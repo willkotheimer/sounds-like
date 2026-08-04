@@ -6,7 +6,7 @@
   // Step 3 ("wire it up"): flip USE_API to true once LASTFM_API_KEY is set in the
   // Netlify dashboard. Everything else is already API-shaped — fetchSimilar and
   // fetchSearch return exactly what the mock returns.
-  var USE_API = false;
+  var USE_API = true;
 
   async function fetchSimilar(name) {
     if (!USE_API) {
@@ -87,6 +87,11 @@
   var edgeSet = new Set();
   var focusName = null;
 
+  // De-dupe key: Last.fm can return the same act under slightly different names
+  // ("The Velvet Underground" vs "Velvet Underground"), so we key nodes on a
+  // normalized form while keeping the first-seen display name.
+  function norm(s) { return String(s).trim().toLowerCase().replace(/^the\s+/, ""); }
+
   var SANS = "system-ui,-apple-system,'Segoe UI',Roboto,sans-serif";
   var MONO = "ui-monospace,Menlo,Consolas,monospace";
   function measure(node) {
@@ -99,7 +104,8 @@
   }
 
   function getNode(name, spawn) {
-    var n = nodes.get(name);
+    var key = norm(name);
+    var n = nodes.get(key);
     if (n) return n;
     var d = DATA[name];
     n = {
@@ -110,14 +116,15 @@
       hasData: USE_API || !!d, matchToParent: null, w: 60, h: 40
     };
     measure(n);
-    nodes.set(name, n);
+    nodes.set(key, n);
     return n;
   }
   function addEdge(aName, bName, match) {
-    var key = aName < bName ? aName + "|" + bName : bName + "|" + aName;
+    var ak = norm(aName), bk = norm(bName);
+    var key = ak < bk ? ak + "|" + bk : bk + "|" + ak;
     if (edgeSet.has(key)) return;
     edgeSet.add(key);
-    edges.push({ a: nodes.get(aName), b: nodes.get(bName), match: match, alpha: 0 });
+    edges.push({ a: nodes.get(ak), b: nodes.get(bk), match: match, alpha: 0 });
   }
 
   async function expand(node) {
@@ -129,7 +136,7 @@
       if (!sims.length) { toast("No similars found for " + node.name); return; }
       sims.slice(0, EXPAND_K).forEach(function (s) {
         var childName = s.name, match = s.match;
-        var existed = nodes.has(childName);
+        var existed = nodes.has(norm(childName));
         var child = getNode(childName, node);
         if (child.matchToParent == null) { child.matchToParent = match; child.parent = node.name; }
         addEdge(node.name, childName, match);
