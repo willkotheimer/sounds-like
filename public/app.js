@@ -110,9 +110,11 @@
     var d = DATA[name];
     n = {
       name: name, tag: d ? d.tag : "",
-      x: spawn ? spawn.x + (Math.random() - 0.5) * 120 : cx,
-      y: spawn ? spawn.y + (Math.random() - 0.5) * 120 : cy,
-      vx: 0, vy: 0, alpha: 0, aT: 1, dist: Infinity, expanded: false, loading: false,
+      x: spawn ? spawn.x + (Math.random() - 0.5) * 14 : cx,
+      y: spawn ? spawn.y + (Math.random() - 0.5) * 14 : cy,
+      vx: 0, vy: 0, alpha: 0, aT: 1, dist: Infinity,
+      grow: spawn ? 0 : 1, growDelay: 0, // a child starts as a bud at the parent and blossoms open
+      expanded: false, loading: false,
       hasData: USE_API || !!d, matchToParent: null, w: 60, h: 40
     };
     measure(n);
@@ -134,13 +136,16 @@
       var sims = await fetchSimilar(node.name);
       node.expanded = true;
       if (!sims.length) { toast("No similars found for " + node.name); return; }
-      sims.slice(0, EXPAND_K).forEach(function (s) {
+      sims.slice(0, EXPAND_K).forEach(function (s, i) {
         var childName = s.name, match = s.match;
         var existed = nodes.has(norm(childName));
         var child = getNode(childName, node);
         if (child.matchToParent == null) { child.matchToParent = match; child.parent = node.name; }
         addEdge(node.name, childName, match);
-        if (!existed && reduced) child.alpha = child.aT;
+        if (!existed) {
+          if (reduced) { child.grow = 1; child.alpha = child.aT; }
+          else { child.growDelay = i * 5; } // petals open in sequence
+        }
       });
       recomputeDepths(); // new nodes/edges shift everyone's distance to centre
     } catch (e) {
@@ -216,12 +221,13 @@
       var a = arr[i];
       for (var j = i + 1; j < n; j++) {
         var b = arr[j];
-        var dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy || 0.01;
+        var dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy;
         if (d2 > 360000) continue;
-        var f = REP / d2, d = Math.sqrt(d2);
+        if (d2 < 16) d2 = 16; // floor avoids a blow-up when buds spawn near-coincident
+        var f = REP / d2, d = Math.sqrt(d2), gg = a.grow * b.grow; // buds barely repel until grown
         var ux = dx / d, uy = dy / d;
-        a.vx += ux * f * 0.016; a.vy += uy * f * 0.016;
-        b.vx -= ux * f * 0.016; b.vy -= uy * f * 0.016;
+        a.vx += ux * f * 0.016 * gg; a.vy += uy * f * 0.016 * gg;
+        b.vx -= ux * f * 0.016 * gg; b.vy -= uy * f * 0.016 * gg;
       }
     }
     edges.forEach(function (e) {
@@ -236,6 +242,8 @@
       if (nd.name === focusName) { nd.vx += (cx - nd.x) * FOCUS_PULL; nd.vy += (cy - nd.y) * FOCUS_PULL; }
       if (drag && drag.node === nd) { nd.x = drag.x; nd.y = drag.y; nd.vx = nd.vy = 0; }
       else { nd.vx *= DAMP; nd.vy *= DAMP; nd.x += nd.vx; nd.y += nd.vy; }
+      if (nd.growDelay > 0) nd.growDelay--;
+      else if (nd.grow < 1) nd.grow += (1 - nd.grow) * 0.14; // bud → full size
       nd.alpha += (nd.aT - nd.alpha) * 0.1; // ease toward distance-based opacity
     });
     for (var it = 0; it < 3; it++) collide(arr, n);
@@ -248,8 +256,9 @@
       for (var j = i + 1; j < n; j++) {
         var b = arr[j];
         var dx = b.x - a.x, dy = b.y - a.y;
-        var ox = (a.w + b.w) / 2 + PADX - Math.abs(dx);
-        var oy = (a.h + b.h) / 2 + PADY - Math.abs(dy);
+        var ag = a.grow, bg = b.grow, mg = Math.min(ag, bg); // collide at current (growing) size
+        var ox = (a.w * ag + b.w * bg) / 2 + PADX * mg - Math.abs(dx);
+        var oy = (a.h * ag + b.h * bg) / 2 + PADY * mg - Math.abs(dy);
         if (ox <= 0 || oy <= 0) continue;
         var aFix = drag && drag.node === a, bFix = drag && drag.node === b;
         if (ox < oy) {
@@ -293,23 +302,28 @@
 
     nodes.forEach(function (nd) {
       var isFocus = nd.name === focusName, isHover = nd.name === hoverName;
-      var scale = isHover ? 1.06 : 1;
-      var w = nd.w * scale, h = nd.h * scale;
+      var s = (isHover ? 1.06 : 1) * nd.grow; // grow: 0 (bud) → 1 (open)
+      if (s < 0.03) return;
       ctx.globalAlpha = isHover ? Math.max(nd.alpha, 0.9) : nd.alpha; // faded nodes stay readable on hover
-      roundRect(nd.x - w / 2, nd.y - h / 2, w, h, 7);
+      ctx.save();
+      ctx.translate(nd.x, nd.y);
+      ctx.scale(s, s);
+      var w = nd.w, h = nd.h;
+      roundRect(-w / 2, -h / 2, w, h, 7);
       ctx.fillStyle = isFocus ? "#f4f1e9" : "#e7e3da";
       ctx.fill();
       if (isFocus || isHover) {
-        ctx.lineWidth = isFocus ? 2 : 1.2;
+        ctx.lineWidth = (isFocus ? 2 : 1.2) / s; // constant visual stroke as it scales
         ctx.strokeStyle = isFocus ? "#47e0d2" : "rgba(71,224,210,.5)";
         ctx.stroke();
       }
       ctx.fillStyle = "#141418"; ctx.textAlign = "center";
       ctx.font = "700 14px " + SANS;
-      ctx.fillText(nd.name, nd.x, nd.y - 2);
+      ctx.fillText(nd.name, 0, -2);
       ctx.fillStyle = "#6a6a74"; ctx.font = "10px " + MONO;
       var sub = nd.loading ? "loading…" : (nd.tag + (nd.hasData && !nd.expanded ? "  +" : ""));
-      ctx.fillText(sub, nd.x, nd.y + 12);
+      ctx.fillText(sub, 0, 12);
+      ctx.restore();
       ctx.globalAlpha = 1;
     });
 
