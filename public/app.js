@@ -112,7 +112,7 @@
       name: name, tag: d ? d.tag : "",
       x: spawn ? spawn.x + (Math.random() - 0.5) * 120 : cx,
       y: spawn ? spawn.y + (Math.random() - 0.5) * 120 : cy,
-      vx: 0, vy: 0, alpha: 0, expanded: false, loading: false,
+      vx: 0, vy: 0, alpha: 0, aT: 1, dist: Infinity, expanded: false, loading: false,
       hasData: USE_API || !!d, matchToParent: null, w: 60, h: 40
     };
     measure(n);
@@ -124,7 +124,7 @@
     var key = ak < bk ? ak + "|" + bk : bk + "|" + ak;
     if (edgeSet.has(key)) return;
     edgeSet.add(key);
-    edges.push({ a: nodes.get(ak), b: nodes.get(bk), match: match, alpha: 0 });
+    edges.push({ a: nodes.get(ak), b: nodes.get(bk), match: match, alpha: 0, aT: 1 });
   }
 
   async function expand(node) {
@@ -140,15 +140,61 @@
         var child = getNode(childName, node);
         if (child.matchToParent == null) { child.matchToParent = match; child.parent = node.name; }
         addEdge(node.name, childName, match);
-        if (!existed && reduced) child.alpha = 1;
+        if (!existed && reduced) child.alpha = child.aT;
       });
+      recomputeDepths(); // new nodes/edges shift everyone's distance to centre
     } catch (e) {
       toast((e && e.message) || "Couldn't load similars");
     } finally {
       node.loading = false;
     }
   }
-  function focus(node) { focusName = node.name; }
+  function focus(node) { focusName = node.name; recomputeDepths(); }
+
+  // "Gradual replacement of the centre": every node's target opacity is a
+  // function of its shortest-path hop distance from the current focus. The
+  // clicked node is the centre (full brightness); the path behind and any side
+  // branches fade with distance but never vanish (floor ~0.1). A far node
+  // re-brightens the instant a new edge shortens its distance to centre.
+  function nodeAlpha(d) {
+    if (!isFinite(d)) return 0.1;   // disconnected / not yet reachable
+    if (d <= 0) return 1;           // the centre
+    if (d === 1) return 0.68;
+    if (d === 2) return 0.4;
+    if (d === 3) return 0.22;
+    return 0.12;                    // 4+ hops out — almost gone
+  }
+
+  function recomputeDepths() {
+    var adj = new Map();
+    nodes.forEach(function (nd) { adj.set(norm(nd.name), []); });
+    edges.forEach(function (e) {
+      var a = norm(e.a.name), b = norm(e.b.name);
+      if (adj.has(a)) adj.get(a).push(b);
+      if (adj.has(b)) adj.get(b).push(a);
+    });
+    nodes.forEach(function (nd) { nd.dist = Infinity; });
+
+    var fk = focusName ? norm(focusName) : null;
+    var start = fk ? nodes.get(fk) : null;
+    if (start) {
+      start.dist = 0;
+      var queue = [fk], seen = Object.create(null); seen[fk] = 1;
+      while (queue.length) {
+        var k = queue.shift(), kn = nodes.get(k), neigh = adj.get(k) || [];
+        for (var i = 0; i < neigh.length; i++) {
+          var nk = neigh[i];
+          if (!seen[nk]) {
+            seen[nk] = 1;
+            var nn = nodes.get(nk);
+            if (nn) { nn.dist = kn.dist + 1; queue.push(nk); }
+          }
+        }
+      }
+    }
+    nodes.forEach(function (nd) { nd.aT = nodeAlpha(nd.dist); });
+    edges.forEach(function (e) { e.aT = nodeAlpha(Math.max(e.a.dist, e.b.dist)); });
+  }
 
   function seed(name) {
     nodes.clear(); edges.length = 0; edgeSet.clear();
@@ -159,8 +205,8 @@
   }
 
   // ── physics: spread forces + a HARD non-overlap constraint ──────────────────
-  var REP = 7000, LINK_GAP = 40, LSPAN = 120, LK = 0.016, DAMP = 0.88, GRAV = 0.0008, FOCUS_PULL = 0.014;
-  var PADX = 26, PADY = 18;
+  var REP = 13000, LINK_GAP = 64, LSPAN = 150, LK = 0.018, DAMP = 0.88, GRAV = 0.001, FOCUS_PULL = 0.02;
+  var PADX = 34, PADY = 26;
   var drag = null;
 
   function physics() {
@@ -171,7 +217,7 @@
       for (var j = i + 1; j < n; j++) {
         var b = arr[j];
         var dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy || 0.01;
-        if (d2 > 250000) continue;
+        if (d2 > 360000) continue;
         var f = REP / d2, d = Math.sqrt(d2);
         var ux = dx / d, uy = dy / d;
         a.vx += ux * f * 0.016; a.vy += uy * f * 0.016;
@@ -190,10 +236,10 @@
       if (nd.name === focusName) { nd.vx += (cx - nd.x) * FOCUS_PULL; nd.vy += (cy - nd.y) * FOCUS_PULL; }
       if (drag && drag.node === nd) { nd.x = drag.x; nd.y = drag.y; nd.vx = nd.vy = 0; }
       else { nd.vx *= DAMP; nd.vy *= DAMP; nd.x += nd.vx; nd.y += nd.vy; }
-      nd.alpha += (1 - nd.alpha) * 0.12;
+      nd.alpha += (nd.aT - nd.alpha) * 0.1; // ease toward distance-based opacity
     });
     for (var it = 0; it < 3; it++) collide(arr, n);
-    edges.forEach(function (e) { e.alpha += (1 - e.alpha) * 0.12; });
+    edges.forEach(function (e) { e.alpha += (e.aT - e.alpha) * 0.1; });
   }
 
   function collide(arr, n) {
@@ -249,7 +295,7 @@
       var isFocus = nd.name === focusName, isHover = nd.name === hoverName;
       var scale = isHover ? 1.06 : 1;
       var w = nd.w * scale, h = nd.h * scale;
-      ctx.globalAlpha = nd.alpha;
+      ctx.globalAlpha = isHover ? Math.max(nd.alpha, 0.9) : nd.alpha; // faded nodes stay readable on hover
       roundRect(nd.x - w / 2, nd.y - h / 2, w, h, 7);
       ctx.fillStyle = isFocus ? "#f4f1e9" : "#e7e3da";
       ctx.fill();
