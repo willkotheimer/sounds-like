@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sounds Like — an artist similarity tree</title>
+  <style>
+    :root {
+      --bg: #0a0a0c; --panel: #131318; --line: #24242c; --ink: #ece8df; --muted: #8b8b96;
+      --faint: #565663; --accent: #47e0d2;
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); overflow: hidden; }
+
+    .hud { position: fixed; top: 0; left: 0; right: 0; z-index: 10; display: flex; align-items: center; gap: 16px; padding: 14px 18px; pointer-events: none; }
+    .title h1 { margin: 0; font-size: 15px; font-weight: 800; letter-spacing: 0.02em; }
+    .title .sub { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 2px; }
+    .spacer { flex: 1; }
+    .search { pointer-events: auto; display: flex; gap: 8px; }
+    .search input { width: 230px; padding: 9px 12px; font-size: 13px; font-family: var(--sans); background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; }
+    .search input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+    .btn { pointer-events: auto; font-family: var(--mono); font-size: 12px; padding: 9px 13px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); cursor: pointer; }
+    .btn:hover { color: var(--ink); border-color: var(--accent); }
+
+    .hint { position: fixed; bottom: 14px; left: 0; right: 0; text-align: center; font-family: var(--mono); font-size: 11.5px; color: var(--faint); letter-spacing: 0.05em; z-index: 10; pointer-events: none; }
+    .hint b { color: var(--muted); }
+    .stat { position: fixed; bottom: 14px; left: 18px; font-family: var(--mono); font-size: 11px; color: var(--faint); z-index: 10; pointer-events: none; }
+
+    canvas { display: block; position: fixed; inset: 0; touch-action: none; }
+
+    .toast { position: fixed; top: 64px; left: 50%; transform: translateX(-50%) translateY(-8px); background: var(--panel); border: 1px solid var(--line); color: var(--ink); font-family: var(--mono); font-size: 12px; padding: 8px 14px; border-radius: 999px; opacity: 0; transition: opacity .2s, transform .2s; z-index: 20; pointer-events: none; }
+    .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <div class="hud">
+    <div class="title">
+      <h1>Sounds Like</h1>
+      <div class="sub" id="sub">crowd similarity · last.fm</div>
+    </div>
+    <div class="spacer"></div>
+    <div class="search">
+      <input id="q" type="text" placeholder="Seed an artist — e.g. Wire, Ramones, Nico" />
+      <button class="btn" id="reset" type="button">reset</button>
+    </div>
+  </div>
+
+  <div class="stat" id="stat"></div>
+  <div class="hint"><b>Click</b> a node to branch its similars · or <b>drag</b> it into the centre ring</div>
+  <div class="toast" id="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

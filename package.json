@@ -1,0 +1,17 @@
+{
+  "name": "sounds-like",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "An interactive artist similarity tree — Last.fm getSimilar, rendered as a force graph. Static frontend + Netlify function proxy.",
+  "scripts": {
+    "dev": "netlify dev",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^2.8.1",
+    "@types/node": "^20.14.0",
+    "netlify-cli": "^17.36.0",
+    "typescript": "^5.4.0"
+  }
+}

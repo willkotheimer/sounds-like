@@ -1,0 +1,329 @@
+(function () {
+  "use strict";
+  var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ── DATA SOURCE SEAM ────────────────────────────────────────────────────────
+  // Step 3 ("wire it up"): flip USE_API to true once LASTFM_API_KEY is set in the
+  // Netlify dashboard. Everything else is already API-shaped — fetchSimilar and
+  // fetchSearch return exactly what the mock returns.
+  var USE_API = false;
+
+  async function fetchSimilar(name) {
+    if (!USE_API) {
+      var d = DATA[name];
+      return d ? d.sim.map(function (s) { return { name: s[0], match: s[1] }; }) : [];
+    }
+    var res = await fetch("/api/similar?artist=" + encodeURIComponent(name) + "&limit=" + EXPAND_K);
+    if (res.status === 429) throw new Error("Rate limited — try again in a moment");
+    if (!res.ok) {
+      var b = await res.json().catch(function () { return {}; });
+      throw new Error(b.error || ("Error " + res.status));
+    }
+    var data = await res.json();
+    return data.similar || [];
+  }
+
+  async function fetchSearch(q) {
+    if (!USE_API) {
+      var lc = q.toLowerCase();
+      return Object.keys(DATA)
+        .filter(function (k) { return k.toLowerCase() === lc || k.toLowerCase().indexOf(lc) === 0; })
+        .map(function (n) { return { name: n }; });
+    }
+    var res = await fetch("/api/search?q=" + encodeURIComponent(q));
+    if (!res.ok) return [];
+    var data = await res.json();
+    return data.results || [];
+  }
+
+  // ── mock data (Last.fm getSimilar shape: name + match 0..1) ─────────────────
+  var DATA = {
+    "The Velvet Underground": { tag: "art rock", sim: [["Nico",.95],["John Cale",.92],["Lou Reed",.92],["The Modern Lovers",.9],["The Stooges",.86],["Television",.82],["Jonathan Richman",.8],["MC5",.72]] },
+    "The Modern Lovers": { tag: "proto-punk", sim: [["Jonathan Richman",.95],["The Velvet Underground",.9],["Talking Heads",.8],["Ramones",.78],["Television",.72]] },
+    "The Stooges": { tag: "proto-punk", sim: [["Iggy Pop",.95],["MC5",.9],["The Velvet Underground",.84],["New York Dolls",.82],["Ramones",.8]] },
+    "Television": { tag: "art punk", sim: [["Wire",.8],["Talking Heads",.82],["The Velvet Underground",.8],["The Modern Lovers",.72],["Pere Ubu",.72]] },
+    "Ramones": { tag: "punk", sim: [["Sex Pistols",.9],["The Clash",.86],["Buzzcocks",.84],["New York Dolls",.8],["The Stooges",.8],["The Modern Lovers",.74]] },
+    "Joy Division": { tag: "post-punk", sim: [["New Order",.95],["The Cure",.82],["Wire",.8],["Bauhaus",.82],["Siouxsie and the Banshees",.8],["Magazine",.82]] },
+    "Wire": { tag: "post-punk", sim: [["Gang of Four",.86],["Mission of Burma",.84],["Joy Division",.8],["Pere Ubu",.82],["Magazine",.8],["Television",.76],["The Fall",.78]] },
+    "New Order": { tag: "post-punk", sim: [["Joy Division",.95],["The Cure",.78],["Magazine",.62],["Bauhaus",.6]] },
+    "Talking Heads": { tag: "new wave", sim: [["Television",.8],["Devo",.78],["Brian Eno",.8],["The Modern Lovers",.76],["Pere Ubu",.68]] },
+    "Gang of Four": { tag: "post-punk", sim: [["Wire",.86],["The Fall",.82],["Mission of Burma",.8],["Public Image Ltd",.82]] },
+    "The Fall": { tag: "post-punk", sim: [["Wire",.78],["Gang of Four",.82],["Public Image Ltd",.8],["Pere Ubu",.76]] },
+    "Public Image Ltd": { tag: "post-punk", sim: [["The Fall",.8],["Gang of Four",.82],["Wire",.76],["Magazine",.78]] },
+    "Siouxsie and the Banshees": { tag: "goth", sim: [["The Cure",.82],["Joy Division",.8],["Bauhaus",.84],["Magazine",.76]] },
+    "Bauhaus": { tag: "goth", sim: [["Siouxsie and the Banshees",.84],["Joy Division",.82],["The Cure",.8]] },
+    "The Cure": { tag: "post-punk", sim: [["Siouxsie and the Banshees",.82],["Joy Division",.82],["New Order",.78],["Bauhaus",.8]] },
+    "Magazine": { tag: "post-punk", sim: [["Wire",.8],["Public Image Ltd",.78],["Joy Division",.82],["Buzzcocks",.76],["Gang of Four",.74]] },
+    "Buzzcocks": { tag: "punk", sim: [["Ramones",.84],["Magazine",.76],["Wire",.74],["Sex Pistols",.78]] },
+    "Sex Pistols": { tag: "punk", sim: [["The Clash",.88],["Ramones",.9],["Buzzcocks",.78],["New York Dolls",.78]] },
+    "The Clash": { tag: "punk", sim: [["Sex Pistols",.88],["Ramones",.86],["Buzzcocks",.76]] },
+    "New York Dolls": { tag: "glam punk", sim: [["The Stooges",.82],["Ramones",.8],["Sex Pistols",.78],["MC5",.76]] },
+    "MC5": { tag: "proto-punk", sim: [["The Stooges",.9],["New York Dolls",.76],["The Velvet Underground",.72],["Ramones",.74]] },
+    "Iggy Pop": { tag: "proto-punk", sim: [["The Stooges",.95],["Lou Reed",.78],["New York Dolls",.76]] },
+    "Lou Reed": { tag: "art rock", sim: [["The Velvet Underground",.92],["John Cale",.86],["Nico",.8],["Iggy Pop",.78]] },
+    "John Cale": { tag: "avant", sim: [["The Velvet Underground",.92],["Lou Reed",.86],["Nico",.84],["Brian Eno",.78]] },
+    "Nico": { tag: "chanson", sim: [["The Velvet Underground",.95],["John Cale",.84],["Lou Reed",.8]] },
+    "Brian Eno": { tag: "ambient", sim: [["John Cale",.76],["Talking Heads",.8],["Devo",.6]] },
+    "Pere Ubu": { tag: "avant-punk", sim: [["Wire",.82],["The Fall",.76],["Devo",.78],["Mission of Burma",.8]] },
+    "Devo": { tag: "new wave", sim: [["Talking Heads",.78],["Pere Ubu",.78],["Wire",.7],["Brian Eno",.6]] },
+    "Mission of Burma": { tag: "post-punk", sim: [["Wire",.84],["Gang of Four",.8],["Pere Ubu",.8]] },
+    "Jonathan Richman": { tag: "proto-punk", sim: [["The Modern Lovers",.95],["The Velvet Underground",.8]] }
+  };
+  var EXPAND_K = 6;
+
+  // ── canvas ────────────────────────────────────────────────────────────────
+  var canvas = document.getElementById("c"), ctx = canvas.getContext("2d");
+  var W = 0, H = 0, dpr = 1, cx = 0, cy = 0, ringR = 120;
+  function resize() {
+    W = innerWidth; H = innerHeight; dpr = Math.min(2, devicePixelRatio || 1);
+    canvas.width = W * dpr; canvas.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx = W / 2; cy = H / 2; ringR = Math.max(70, Math.min(W, H) * 0.15);
+  }
+  addEventListener("resize", resize); resize();
+
+  // ── graph ───────────────────────────────────────────────────────────────
+  var nodes = new Map();
+  var edges = [];
+  var edgeSet = new Set();
+  var focusName = null;
+
+  var SANS = "system-ui,-apple-system,'Segoe UI',Roboto,sans-serif";
+  var MONO = "ui-monospace,Menlo,Consolas,monospace";
+  function measure(node) {
+    ctx.font = "700 14px " + SANS;
+    var wName = ctx.measureText(node.name).width;
+    ctx.font = "10px " + MONO;
+    var wTag = ctx.measureText(node.tag).width;
+    node.w = Math.max(wName, wTag) + 26;
+    node.h = 40;
+  }
+
+  function getNode(name, spawn) {
+    var n = nodes.get(name);
+    if (n) return n;
+    var d = DATA[name];
+    n = {
+      name: name, tag: d ? d.tag : "",
+      x: spawn ? spawn.x + (Math.random() - 0.5) * 120 : cx,
+      y: spawn ? spawn.y + (Math.random() - 0.5) * 120 : cy,
+      vx: 0, vy: 0, alpha: 0, expanded: false, loading: false,
+      hasData: USE_API || !!d, matchToParent: null, w: 60, h: 40
+    };
+    measure(n);
+    nodes.set(name, n);
+    return n;
+  }
+  function addEdge(aName, bName, match) {
+    var key = aName < bName ? aName + "|" + bName : bName + "|" + aName;
+    if (edgeSet.has(key)) return;
+    edgeSet.add(key);
+    edges.push({ a: nodes.get(aName), b: nodes.get(bName), match: match, alpha: 0 });
+  }
+
+  async function expand(node) {
+    if (node.expanded || node.loading) return;
+    node.loading = true;
+    try {
+      var sims = await fetchSimilar(node.name);
+      node.expanded = true;
+      if (!sims.length) { toast("No similars found for " + node.name); return; }
+      sims.slice(0, EXPAND_K).forEach(function (s) {
+        var childName = s.name, match = s.match;
+        var existed = nodes.has(childName);
+        var child = getNode(childName, node);
+        if (child.matchToParent == null) { child.matchToParent = match; child.parent = node.name; }
+        addEdge(node.name, childName, match);
+        if (!existed && reduced) child.alpha = 1;
+      });
+    } catch (e) {
+      toast((e && e.message) || "Couldn't load similars");
+    } finally {
+      node.loading = false;
+    }
+  }
+  function focus(node) { focusName = node.name; }
+
+  function seed(name) {
+    nodes.clear(); edges.length = 0; edgeSet.clear();
+    var n = getNode(name, null);
+    n.x = cx; n.y = cy; n.alpha = 1;
+    focus(n);
+    setTimeout(function () { expand(n); }, reduced ? 0 : 220);
+  }
+
+  // ── physics: spread forces + a HARD non-overlap constraint ──────────────────
+  var REP = 7000, LINK_GAP = 40, LSPAN = 120, LK = 0.016, DAMP = 0.88, GRAV = 0.0008, FOCUS_PULL = 0.014;
+  var PADX = 26, PADY = 18;
+  var drag = null;
+
+  function physics() {
+    var arr = Array.from(nodes.values()), n = arr.length;
+
+    for (var i = 0; i < n; i++) {
+      var a = arr[i];
+      for (var j = i + 1; j < n; j++) {
+        var b = arr[j];
+        var dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy || 0.01;
+        if (d2 > 250000) continue;
+        var f = REP / d2, d = Math.sqrt(d2);
+        var ux = dx / d, uy = dy / d;
+        a.vx += ux * f * 0.016; a.vy += uy * f * 0.016;
+        b.vx -= ux * f * 0.016; b.vy -= uy * f * 0.016;
+      }
+    }
+    edges.forEach(function (e) {
+      var dx = e.b.x - e.a.x, dy = e.b.y - e.a.y, d = Math.hypot(dx, dy) || 0.01;
+      var target = (e.a.w + e.b.w) / 2 + LINK_GAP + (1 - e.match) * LSPAN;
+      var diff = (d - target) / d * LK;
+      var mx = dx * diff, my = dy * diff;
+      e.a.vx += mx; e.a.vy += my; e.b.vx -= mx; e.b.vy -= my;
+    });
+    arr.forEach(function (nd) {
+      nd.vx += (cx - nd.x) * GRAV; nd.vy += (cy - nd.y) * GRAV;
+      if (nd.name === focusName) { nd.vx += (cx - nd.x) * FOCUS_PULL; nd.vy += (cy - nd.y) * FOCUS_PULL; }
+      if (drag && drag.node === nd) { nd.x = drag.x; nd.y = drag.y; nd.vx = nd.vy = 0; }
+      else { nd.vx *= DAMP; nd.vy *= DAMP; nd.x += nd.vx; nd.y += nd.vy; }
+      nd.alpha += (1 - nd.alpha) * 0.12;
+    });
+    for (var it = 0; it < 3; it++) collide(arr, n);
+    edges.forEach(function (e) { e.alpha += (1 - e.alpha) * 0.12; });
+  }
+
+  function collide(arr, n) {
+    for (var i = 0; i < n; i++) {
+      var a = arr[i];
+      for (var j = i + 1; j < n; j++) {
+        var b = arr[j];
+        var dx = b.x - a.x, dy = b.y - a.y;
+        var ox = (a.w + b.w) / 2 + PADX - Math.abs(dx);
+        var oy = (a.h + b.h) / 2 + PADY - Math.abs(dy);
+        if (ox <= 0 || oy <= 0) continue;
+        var aFix = drag && drag.node === a, bFix = drag && drag.node === b;
+        if (ox < oy) {
+          var sx = dx >= 0 ? 1 : -1;
+          if (aFix && !bFix) b.x += sx * ox;
+          else if (bFix && !aFix) a.x -= sx * ox;
+          else { a.x -= sx * ox / 2; b.x += sx * ox / 2; }
+        } else {
+          var sy = dy >= 0 ? 1 : -1;
+          if (aFix && !bFix) b.y += sy * oy;
+          else if (bFix && !aFix) a.y -= sy * oy;
+          else { a.y -= sy * oy / 2; b.y += sy * oy / 2; }
+        }
+      }
+    }
+  }
+
+  // ── render ────────────────────────────────────────────────────────────────
+  var hoverName = null, ringHot = false;
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+
+    ctx.setLineDash([4, 6]); ctx.lineWidth = 1.5;
+    ctx.strokeStyle = ringHot ? "rgba(71,224,210,.8)" : "rgba(120,120,135,.32)";
+    ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, 6.2832); ctx.stroke();
+    ctx.setLineDash([]);
+
+    edges.forEach(function (e) {
+      var focused = (e.a.name === focusName || e.b.name === focusName);
+      ctx.globalAlpha = e.alpha * (0.16 + e.match * 0.5);
+      ctx.strokeStyle = focused ? "rgba(71,224,210,.9)" : "rgba(150,155,170,.9)";
+      ctx.lineWidth = 1 + e.match * 2.4;
+      ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y); ctx.stroke();
+      if (hoverName && !focused && (e.a.name === hoverName || e.b.name === hoverName)) {
+        ctx.globalAlpha = e.alpha * 0.8;
+        ctx.fillStyle = "#9aa"; ctx.font = "10px " + MONO; ctx.textAlign = "center";
+        ctx.fillText(Math.round(e.match * 100) + "%", (e.a.x + e.b.x) / 2, (e.a.y + e.b.y) / 2 - 3);
+      }
+    });
+    ctx.globalAlpha = 1;
+
+    nodes.forEach(function (nd) {
+      var isFocus = nd.name === focusName, isHover = nd.name === hoverName;
+      var scale = isHover ? 1.06 : 1;
+      var w = nd.w * scale, h = nd.h * scale;
+      ctx.globalAlpha = nd.alpha;
+      roundRect(nd.x - w / 2, nd.y - h / 2, w, h, 7);
+      ctx.fillStyle = isFocus ? "#f4f1e9" : "#e7e3da";
+      ctx.fill();
+      if (isFocus || isHover) {
+        ctx.lineWidth = isFocus ? 2 : 1.2;
+        ctx.strokeStyle = isFocus ? "#47e0d2" : "rgba(71,224,210,.5)";
+        ctx.stroke();
+      }
+      ctx.fillStyle = "#141418"; ctx.textAlign = "center";
+      ctx.font = "700 14px " + SANS;
+      ctx.fillText(nd.name, nd.x, nd.y - 2);
+      ctx.fillStyle = "#6a6a74"; ctx.font = "10px " + MONO;
+      var sub = nd.loading ? "loading…" : (nd.tag + (nd.hasData && !nd.expanded ? "  +" : ""));
+      ctx.fillText(sub, nd.x, nd.y + 12);
+      ctx.globalAlpha = 1;
+    });
+
+    statEl.textContent = nodes.size + " artists · " + edges.length + " links · seed: " + (seedName || "—") + " · " + (USE_API ? "live" : "demo data");
+  }
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function loop() { physics(); render(); requestAnimationFrame(loop); }
+
+  // ── interaction ─────────────────────────────────────────────────────────────
+  function pick(mx, my) {
+    var hit = null;
+    nodes.forEach(function (nd) {
+      if (mx >= nd.x - nd.w / 2 && mx <= nd.x + nd.w / 2 && my >= nd.y - nd.h / 2 && my <= nd.y + nd.h / 2) hit = nd;
+    });
+    return hit;
+  }
+  canvas.addEventListener("pointerdown", function (e) {
+    var nd = pick(e.clientX, e.clientY);
+    if (!nd) return;
+    drag = { node: nd, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, moved: false, branched: false };
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener("pointermove", function (e) {
+    hoverName = drag ? drag.node.name : (function () { var n = pick(e.clientX, e.clientY); return n ? n.name : null; })();
+    canvas.style.cursor = hoverName ? "pointer" : "default";
+    if (!drag) return;
+    drag.x = e.clientX; drag.y = e.clientY;
+    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 5) drag.moved = true;
+    var inRing = Math.hypot(e.clientX - cx, e.clientY - cy) < ringR;
+    ringHot = inRing;
+    if (inRing && !drag.branched) { drag.branched = true; expand(drag.node); focus(drag.node); pulseRing(); }
+  });
+  function endDrag() {
+    if (!drag) return;
+    var d = drag; drag = null; ringHot = false;
+    if (!d.moved) { expand(d.node); focus(d.node); }
+  }
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", endDrag);
+  function pulseRing() { ringHot = true; setTimeout(function () { if (!drag) ringHot = false; }, 260); }
+
+  // ── chrome ────────────────────────────────────────────────────────────────
+  var statEl = document.getElementById("stat");
+  var subEl = document.getElementById("sub");
+  var toastEl = document.getElementById("toast"), toastT = null;
+  function toast(m) { toastEl.textContent = m; toastEl.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(function () { toastEl.classList.remove("on"); }, 1800); }
+  var seedName = null;
+  function doSeed(name) { seedName = name; seed(name); }
+
+  var q = document.getElementById("q");
+  q.addEventListener("keydown", async function (e) {
+    if (e.key !== "Enter") return;
+    var v = q.value.trim(); if (!v) return;
+    var results = await fetchSearch(v);
+    if (results.length) { doSeed(results[0].name); q.blur(); }
+    else toast(USE_API ? "No artist found for “" + v + "”" : "Not in this demo set — try Wire, Nico, Ramones…");
+  });
+  document.getElementById("reset").addEventListener("click", function () { doSeed("The Velvet Underground"); });
+
+  // ── boot ────────────────────────────────────────────────────────────────────
+  if (subEl) subEl.textContent = "crowd similarity · " + (USE_API ? "last.fm live" : "demo data");
+  doSeed("The Velvet Underground");
+  requestAnimationFrame(loop);
+})();
