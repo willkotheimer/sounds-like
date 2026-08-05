@@ -35,12 +35,11 @@
     .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
 
     /* plugin slots — Spotify embeds later; placeholders (band names) for now */
-    .plugins { position: fixed; top: 88px; bottom: 44px; width: 200px; display: flex; flex-direction: column; gap: 10px; z-index: 8; pointer-events: auto; overflow-y: auto; }
+    .plugins { position: fixed; top: 88px; bottom: 44px; width: 300px; display: flex; flex-direction: column; gap: 10px; z-index: 8; pointer-events: auto; overflow-y: auto; }
     .plugins-left { left: 12px; }
     .plugins-right { right: 12px; }
-    .plugin { background: rgba(19,19,24,.82); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow: hidden; pointer-events: auto; cursor: pointer; }
+    .plugin { background: rgba(19,19,24,.82); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; flex: 0 0 auto; display: flex; flex-direction: column; gap: 8px; overflow: hidden; pointer-events: auto; cursor: pointer; }
     .plugin:hover { border-color: var(--accent); }
-    .plugin.is-player { flex: 0 0 auto; }
     .plugin .p-name { font-weight: 700; font-size: 13px; line-height: 1.15; display: flex; justify-content: space-between; gap: 6px; }
     .plugin .p-name .p-match { color: var(--faint); font-weight: 400; font-size: 11px; flex: 0 0 auto; }
     .plugin.is-focus { border-color: var(--accent); }
@@ -64,11 +63,10 @@
     .modal-player iframe { display: block; width: 100%; border: 0; border-radius: 10px; }
     .modal-bio { font-size: 13.5px; line-height: 1.6; color: var(--muted); }
 
-    @media (max-width: 900px) { .plugins { width: 148px; } }
+    @media (max-width: 1024px) { .plugins { width: 232px; } }
     @media (max-width: 640px) {
       .plugins-left, .plugins-right { display: none; }
-      .plugin-bottom { display: block; position: fixed; left: 10px; right: 10px; bottom: 40px; z-index: 8; pointer-events: none; }
-      .plugin-bottom .plugin { height: 68px; }
+      .plugin-bottom { display: block; position: fixed; left: 10px; right: 10px; bottom: 40px; z-index: 8; pointer-events: auto; }
       .hud { flex-wrap: wrap; padding: 10px 12px; gap: 8px 12px; }
       .title h1 { font-size: 14px; }
       .title .sub { font-size: 10px; }

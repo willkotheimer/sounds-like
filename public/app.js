@@ -257,10 +257,10 @@
   }
   // Create a controller on `host` (replaced by the iframe). `autoplay` starts the
   // centre; starting any player pauses the others (only one sounds at a time).
-  function mountPlayer(host, id, gen, autoplay) {
+  function mountPlayer(host, id, gen, autoplay, height) {
     whenApi(function (api) {
       if (gen !== pluginGen || !host.isConnected) return;
-      api.createController(host, { uri: "spotify:artist:" + id, width: "100%", height: 80 }, function (controller) {
+      api.createController(host, { uri: "spotify:artist:" + id, width: "100%", height: height || 152 }, function (controller) {
         if (gen !== pluginGen) { try { controller.destroy(); } catch (e) {} return; }
         controllers.push(controller);
         controller.addListener("playback_update", function (e) {
@@ -280,7 +280,7 @@
       '<div class="p-player"><div class="pl-empty">loading…</div></div></div>';
   }
   // Render a column of slots, then mount a Spotify IFrame-API player in each.
-  function buildColumn(el, items, focusNode, gen) {
+  function buildColumn(el, items, focusNode, gen, height) {
     el.innerHTML = items.map(function (nd) { return slotHTML(nd, nd === focusNode); }).join("");
     var hosts = el.querySelectorAll(".p-player");
     items.forEach(function (nd, i) {
@@ -288,7 +288,7 @@
       var isFocus = nd === focusNode;
       fetchArtist(nd.name).then(function (info) {
         if (gen !== pluginGen || !host.isConnected) return; // rebuilt while fetching
-        if (info.spotify && info.spotify.id) mountPlayer(host, info.spotify.id, gen, isFocus);
+        if (info.spotify && info.spotify.id) mountPlayer(host, info.spotify.id, gen, isFocus, height);
         else host.innerHTML = '<div class="pl-empty">' + (info.configured === false ? "Add Spotify keys" : "Not on Spotify") + "</div>";
       });
     });
@@ -311,10 +311,10 @@
       left.innerHTML = right.innerHTML = bottom.innerHTML = "";
     } else if (isMobile()) {
       left.innerHTML = right.innerHTML = "";
-      buildColumn(bottom, [fn], fn, pluginGen);            // mobile: only the selected player
+      buildColumn(bottom, [fn], fn, pluginGen, 152);            // mobile: compact full-width bar
     } else {
-      buildColumn(left, list.slice(0, 4), fn, pluginGen);  // centre + 3 (4 players)
-      buildColumn(right, list.slice(4, 7), fn, pluginGen); // 3 players
+      buildColumn(left, list.slice(0, 4), fn, pluginGen, 352);  // centre + 3, tall vertical cards
+      buildColumn(right, list.slice(4, 7), fn, pluginGen, 352); // 3 more
       bottom.innerHTML = "";
     }
     lastMobile = isMobile();
