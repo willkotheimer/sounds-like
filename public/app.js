@@ -180,10 +180,9 @@
   // reappearing the instant a new edge brings it back within range.
   function nodeAlpha(d) {
     if (!isFinite(d)) return 0;
-    if (d <= 0) return 1;
-    if (d === 1) return 0.7;
-    if (d === 2) return 0.4;
-    return 0; // 3+ hops — gone
+    if (d <= 0) return 1;   // the centre
+    if (d === 1) return 0.7; // its neighbours
+    return 0;               // 2+ hops disappear — keep the screen to centre + one ring
   }
 
   function recomputeDepths() {
