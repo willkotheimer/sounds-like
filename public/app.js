@@ -87,13 +87,16 @@
 
   // ── canvas ────────────────────────────────────────────────────────────────
   var canvas = document.getElementById("c"), ctx = canvas.getContext("2d");
-  var W = 0, H = 0, dpr = 1, cx = 0, cy = 0, ringR = 120, SZ = 1;
+  var W = 0, H = 0, dpr = 1, cx = 0, cy = 0, ringR = 120, SZ = 1, PSCALE = 0.6;
+  function playerRadius() { return Math.hypot(300 * PSCALE, 352 * PSCALE) / 2 + 30; }
   function resize() {
     W = innerWidth; H = innerHeight; dpr = Math.min(2, devicePixelRatio || 1);
     canvas.width = W * dpr; canvas.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    cx = W / 2; cy = H / 2; ringR = Math.max(60, Math.min(W, H) * 0.15);
+    cx = W / 2; cy = H / 2;
+    PSCALE = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--pscale")) || 0.6;
+    ringR = Math.max(80, playerRadius()); // the ring frames the centre player
     SZ = W < 640 ? 0.7 : 1; // smaller nodes + spacing on mobile
-    if (nodes && isMobile() !== lastMobile) updatePlugins(); // rebuild slots when crossing the breakpoint
+    if (nodes && isMobile() !== lastMobile) updatePlugins(); // rebuild when crossing the breakpoint
   }
   addEventListener("resize", resize); resize();
 
@@ -335,7 +338,7 @@
     destroyControllers();   // tear down old player before rebuilding
     // Only the centre is a player now; neighbours are image nodes on the graph.
     if (!fn) bottom.innerHTML = "";
-    else buildColumn(bottom, [fn], fn, pluginGen, !isMobile()); // desktop scaled card, mobile bar
+    else buildColumn(bottom, [fn], fn, pluginGen, true); // centre player, on the node
     lastMobile = isMobile();
 
     var statEl = document.getElementById("stat");
@@ -437,6 +440,16 @@
       nd.alpha += (nd.aT - nd.alpha) * 0.1;
     });
     for (var it = 0; it < 3; it++) collide(arr, n);
+    // hard keep-out: neighbours never sit under the centre player's footprint
+    if (focusNode && focusNode.aT > 0.001) {
+      var rmin = playerRadius();
+      for (var ki = 0; ki < n; ki++) {
+        var kn = arr[ki];
+        if (kn === focusNode || kn.aT <= 0.001) continue;
+        var kdx = kn.x - focusNode.x, kdy = kn.y - focusNode.y, kd = Math.hypot(kdx, kdy) || 0.01;
+        if (kd < rmin) { var pk = rmin - kd; kn.x += (kdx / kd) * pk; kn.y += (kdy / kd) * pk; }
+      }
+    }
     edges.forEach(function (e) { e.alpha += (e.aT - e.alpha) * 0.1; });
   }
 
@@ -495,6 +508,7 @@
 
     nodes.forEach(function (nd) {
       if (nd.alpha < 0.02) return;
+      if (nd.name === focusName) return; // the centre is drawn as the DOM player
       var isFocus = nd.name === focusName, isHover = nd.name === hoverName;
       var s = (isHover ? 1.06 : 1) * nd.grow * SZ;
       if (s < 0.02) return;
@@ -534,11 +548,12 @@
   function positionCenterPlayer() {
     var el = document.getElementById("pluginBottom");
     if (!el) return;
-    if (isMobile()) { el.style.left = ""; el.style.top = ""; return; }
     var fn = focusName ? nodes.get(norm(focusName)) : null;
-    if (!fn) return;
+    if (!fn) { el.style.display = "none"; return; }
+    el.style.display = "block";
     el.style.left = fn.x + "px";
-    el.style.top = (fn.y + (fn.h * SZ) / 2 + 12) + "px";
+    el.style.top = fn.y + "px";
+    el.style.transform = "translate(-50%, -50%)"; // the player IS the centre node
   }
   function loop() { physics(); render(); positionCenterPlayer(); requestAnimationFrame(loop); }
 
