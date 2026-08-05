@@ -37,8 +37,7 @@
 
     /* plugin slots — Spotify embeds later; placeholders (band names) for now */
     .plugins { position: fixed; top: 88px; bottom: 44px; width: calc(300px * var(--pscale) + 34px); display: flex; flex-direction: column; gap: 10px; z-index: 8; pointer-events: auto; overflow-y: auto; }
-    .plugins-left { left: 12px; }
-    .plugins-right { right: 12px; }
+    .plugins-left, .plugins-right { display: none; } /* neighbours now live on the graph nodes */
     .plugin { background: rgba(19,19,24,.82); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; flex: 0 0 auto; display: flex; flex-direction: column; gap: 8px; overflow: hidden; pointer-events: auto; cursor: pointer; }
     .plugin:hover { border-color: var(--accent); }
     .plugin .p-name { font-weight: 700; font-size: 13px; line-height: 1.15; display: flex; justify-content: space-between; gap: 6px; }

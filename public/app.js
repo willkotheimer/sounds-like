@@ -4,7 +4,7 @@
 
   // ── DATA SOURCE SEAM ────────────────────────────────────────────────────────
   var USE_API = true;
-  var EXPAND_K = 6;   // children shown per expand
+  var EXPAND_K = 8;   // children shown per expand
   var POOL = 25;      // similars fetched, then diversity-sampled down to EXPAND_K
   var CYAN = "#47e0d2";
   var CYAN_BRIGHT = "#8ff8ec";
@@ -108,13 +108,17 @@
 
   var SANS = "system-ui,-apple-system,'Segoe UI',Roboto,sans-serif";
   var MONO = "ui-monospace,Menlo,Consolas,monospace";
-  function measure(node) { // base size; SZ is applied at draw/physics time
-    ctx.font = "700 14px " + SANS;
-    var wName = ctx.measureText(node.name).width;
-    ctx.font = "10px " + MONO;
-    var wTag = ctx.measureText(node.tag).width;
-    node.w = Math.max(wName, wTag) + 26;
-    node.h = 40;
+  var IMG = 54; // node avatar size (base; SZ applied at draw/physics time)
+  function measure(node) {
+    ctx.font = "700 13px " + SANS;
+    var label = node.name, maxW = 130;
+    if (ctx.measureText(label).width > maxW) {
+      while (label.length > 1 && ctx.measureText(label + "…").width > maxW) label = label.slice(0, -1);
+      label = label.replace(/\s+…$/, "") + "…";
+    }
+    node._label = label;
+    node.w = Math.max(IMG, ctx.measureText(label).width) + 16;
+    node.h = IMG + 22; // avatar + name line
   }
 
   function getNode(name, spawn) {
@@ -244,6 +248,29 @@
     return artistCache[k];
   }
 
+  // Node avatars: the Spotify artist image, cached + drawn on the canvas node.
+  var imgCache = {};
+  function getNodeImage(name) {
+    var k = norm(name);
+    var e = imgCache[k];
+    if (e) return e.status === "ok" ? e.img : null;
+    imgCache[k] = { status: "loading", img: null };
+    fetchArtist(name).then(function (info) {
+      var url = info.spotify && info.spotify.image;
+      if (!url) { imgCache[k].status = "none"; return; }
+      var img = new Image();
+      img.onload = function () { imgCache[k] = { status: "ok", img: img }; };
+      img.onerror = function () { imgCache[k].status = "err"; };
+      img.src = url; // drawn only; canvas may taint but we never read it back
+    });
+    return null;
+  }
+  function colorFor(nd) {
+    var h = 0, s = norm(nd.name);
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+    return "hsl(" + h + ",42%,40%)";
+  }
+
   // ── Spotify IFrame API: real players with play/pause + events ──────────────
   var SpApi = null, apiQueue = [];
   window.onSpotifyIframeApiReady = function (api) { SpApi = api; apiQueue.forEach(function (fn) { fn(api); }); apiQueue = []; };
@@ -300,28 +327,15 @@
   }
 
   function updatePlugins() {
-    var left = document.getElementById("pluginsLeft");
-    var right = document.getElementById("pluginsRight");
     var bottom = document.getElementById("pluginBottom");
-    if (!left || !right || !bottom) return;
+    if (!bottom) return;
     var fn = focusName ? nodes.get(norm(focusName)) : null;
-    var neigh = [];
-    nodes.forEach(function (nd) { if (nd.dist === 1) neigh.push(nd); });
-    neigh.sort(function (a, b) { return matchToFocus(b) - matchToFocus(a); });
-    var list = (fn ? [fn].concat(neigh) : neigh).slice(0, 7); // centre + 6
 
     pluginGen++;            // invalidate any in-flight player mounts
-    destroyControllers();   // tear down old players before rebuilding
-    if (!fn) {
-      left.innerHTML = right.innerHTML = bottom.innerHTML = "";
-    } else if (isMobile()) {
-      left.innerHTML = right.innerHTML = "";
-      buildColumn(bottom, [fn], fn, pluginGen, false);          // mobile: compact full-width bar
-    } else {
-      buildColumn(left, list.slice(1, 4), fn, pluginGen, true);  // 3 neighbours
-      buildColumn(right, list.slice(4, 7), fn, pluginGen, true); // 3 neighbours
-      buildColumn(bottom, [fn], fn, pluginGen, true);            // centre — docked below the graph
-    }
+    destroyControllers();   // tear down old player before rebuilding
+    // Only the centre is a player now; neighbours are image nodes on the graph.
+    if (!fn) bottom.innerHTML = "";
+    else buildColumn(bottom, [fn], fn, pluginGen, !isMobile()); // desktop scaled card, mobile bar
     lastMobile = isMobile();
 
     var statEl = document.getElementById("stat");
@@ -488,21 +502,22 @@
       ctx.save();
       ctx.translate(nd.x, nd.y);
       ctx.scale(s, s);
-      var w = nd.w, h = nd.h;
-      roundRect(-w / 2, -h / 2, w, h, 7);
-      ctx.fillStyle = isFocus ? "#f4f1e9" : "#e7e3da";
-      ctx.fill();
-      if (isFocus || isHover) {
-        ctx.lineWidth = (isFocus ? 2 : 1.2) / s;
-        ctx.strokeStyle = isFocus ? CYAN_BRIGHT : "rgba(143,248,236,.6)";
-        ctx.stroke();
-      }
-      ctx.fillStyle = "#141418"; ctx.textAlign = "center";
-      ctx.font = "700 14px " + SANS;
-      ctx.fillText(nd.name, 0, -2);
-      ctx.fillStyle = "#6a6a74"; ctx.font = "10px " + MONO;
-      var sub = nd.loading ? "loading…" : (nd.tag + (nd.hasData && !nd.expanded ? "  +" : ""));
-      ctx.fillText(sub, 0, 12);
+      var top = -nd.h / 2;
+      // avatar (Spotify image, or a colored placeholder while it loads)
+      ctx.save();
+      roundRect(-IMG / 2, top, IMG, IMG, 12);
+      ctx.clip();
+      var img = getNodeImage(nd.name);
+      if (img) ctx.drawImage(img, -IMG / 2, top, IMG, IMG);
+      else { ctx.fillStyle = colorFor(nd); ctx.fillRect(-IMG / 2, top, IMG, IMG); }
+      ctx.restore();
+      // ring (focus / hover highlight)
+      ctx.lineWidth = (isFocus ? 3 : isHover ? 2 : 1) / s;
+      ctx.strokeStyle = isFocus ? CYAN_BRIGHT : isHover ? "rgba(143,248,236,.6)" : "rgba(255,255,255,.14)";
+      roundRect(-IMG / 2, top, IMG, IMG, 12); ctx.stroke();
+      // name
+      ctx.fillStyle = "#e7e3da"; ctx.textAlign = "center"; ctx.font = "700 13px " + SANS;
+      ctx.fillText(nd._label || nd.name, 0, top + IMG + 15);
       ctx.restore();
       ctx.globalAlpha = 1;
     });
