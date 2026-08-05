@@ -87,7 +87,8 @@
 
   // ── canvas ────────────────────────────────────────────────────────────────
   var canvas = document.getElementById("c"), ctx = canvas.getContext("2d");
-  var W = 0, H = 0, dpr = 1, cx = 0, cy = 0, ringR = 120, SZ = 1, PSCALE = 0.6;
+  var W = 0, H = 0, dpr = 1, cx = 0, cy = 0, ringR = 120, SZ = 1, PSCALE = 0.6, ZOOM = 1;
+  function sc() { return SZ * ZOOM; }              // combined platform + pinch scale
   function playerRadius() { return Math.hypot(300 * PSCALE, 352 * PSCALE) / 2 + 30; }
   function resize() {
     W = innerWidth; H = innerHeight; dpr = Math.min(2, devicePixelRatio || 1);
@@ -396,11 +397,12 @@
   var REP = 13000, LINK_GAP = 64, LSPAN = 150, LK = 0.018, DAMP = 0.88, GRAV = 0, FOCUS_PULL = 0;
   var FOCUS_REP = 55000; // extra outward push from the centre node onto its branches
   var PADX = 34, PADY = 26;
-  var drag = null, pan = null; // pan = dragging empty space to move the whole group
+  var drag = null, pan = null, pointers = {}, pinch = null; // pan/drag + multi-touch pinch
 
   function physics() {
     var arr = Array.from(nodes.values()), n = arr.length;
     var focusNode = focusName ? nodes.get(norm(focusName)) : null;
+    var SCALE = sc(), LINKF = isMobile() ? 0.72 : 1; // shorter edges on mobile
 
     for (var i = 0; i < n; i++) {
       var a = arr[i];
@@ -413,8 +415,8 @@
         if (d2 < 16) d2 = 16;
         var f = REP / d2, d = Math.sqrt(d2), gg = a.grow * b.grow;
         var ux = dx / d, uy = dy / d;
-        a.vx += ux * f * 0.016 * gg * SZ; a.vy += uy * f * 0.016 * gg * SZ;
-        b.vx -= ux * f * 0.016 * gg * SZ; b.vy -= uy * f * 0.016 * gg * SZ;
+        a.vx += ux * f * 0.016 * gg * SCALE; a.vy += uy * f * 0.016 * gg * SCALE;
+        b.vx -= ux * f * 0.016 * gg * SCALE; b.vy -= uy * f * 0.016 * gg * SCALE;
       }
     }
     // the centre node pushes its neighbours/branches outward for breathing room
@@ -431,7 +433,7 @@
     edges.forEach(function (e) {
       if (e.a.aT <= 0.001 || e.b.aT <= 0.001) return;
       var dx = e.b.x - e.a.x, dy = e.b.y - e.a.y, d = Math.hypot(dx, dy) || 0.01;
-      var target = ((e.a.w + e.b.w) / 2 + LINK_GAP + (1 - e.match) * LSPAN) * SZ;
+      var target = ((e.a.w + e.b.w) / 2 + LINK_GAP + (1 - e.match) * LSPAN) * SCALE * LINKF;
       var diff = (d - target) / d * LK;
       var mx = dx * diff, my = dy * diff;
       e.a.vx += mx; e.a.vy += my; e.b.vx -= mx; e.b.vy -= my;
@@ -460,6 +462,7 @@
   }
 
   function collide(arr, n) {
+    var SC = sc();
     for (var i = 0; i < n; i++) {
       var a = arr[i];
       if (a.aT <= 0.001) continue;
@@ -468,8 +471,8 @@
         if (b.aT <= 0.001) continue;
         var dx = b.x - a.x, dy = b.y - a.y;
         var ag = a.grow, bg = b.grow, mg = Math.min(ag, bg);
-        var ox = ((a.w * ag + b.w * bg) / 2 + PADX * mg) * SZ - Math.abs(dx);
-        var oy = ((a.h * ag + b.h * bg) / 2 + PADY * mg) * SZ - Math.abs(dy);
+        var ox = ((a.w * ag + b.w * bg) / 2 + PADX * mg) * SC - Math.abs(dx);
+        var oy = ((a.h * ag + b.h * bg) / 2 + PADY * mg) * SC - Math.abs(dy);
         if (ox <= 0 || oy <= 0) continue;
         var aFix = drag && drag.node === a, bFix = drag && drag.node === b;
         if (ox < oy) {
@@ -516,7 +519,7 @@
       if (nd.alpha < 0.02) return;
       if (nd.name === focusName && !isMobile()) return; // desktop: centre is the DOM player
       var isFocus = nd.name === focusName, isHover = nd.name === hoverName;
-      var s = (isHover ? 1.06 : 1) * nd.grow * SZ;
+      var s = (isHover ? 1.06 : 1) * nd.grow * sc();
       if (s < 0.02) return;
       var D = nodeSize();
       ctx.globalAlpha = isHover ? Math.max(nd.alpha, 0.9) : nd.alpha;
@@ -570,21 +573,35 @@
 
   // ── interaction ─────────────────────────────────────────────────────────────
   function pick(mx, my) {
-    var hit = null;
+    var hit = null, scale = sc(), pad = 10; // pad makes touch taps land reliably
     nodes.forEach(function (nd) {
       if (nd.aT <= 0.001) return; // can't click a disappeared node
-      var hw = nd.w * SZ / 2, hh = nd.h * SZ / 2;
+      var hw = nd.w * scale / 2 + pad, hh = nd.h * scale / 2 + pad;
       if (mx >= nd.x - hw && mx <= nd.x + hw && my >= nd.y - hh && my <= nd.y + hh) hit = nd;
     });
     return hit;
   }
+  function pointerDist() {
+    var ids = Object.keys(pointers);
+    if (ids.length < 2) return 0;
+    var a = pointers[ids[0]], b = pointers[ids[1]];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
   canvas.addEventListener("pointerdown", function (e) {
+    pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+    if (Object.keys(pointers).length === 2) { drag = null; pan = null; pinch = { dist: pointerDist() }; return; }
     var nd = pick(e.clientX, e.clientY);
-    if (nd) drag = { node: nd, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, moved: false, branched: false };
+    if (nd) drag = { node: nd, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, moved: false, branched: false, thresh: e.pointerType === "touch" ? 12 : 5 };
     else pan = { x: e.clientX, y: e.clientY }; // grab empty space to move the whole group
-    canvas.setPointerCapture(e.pointerId);
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
   });
   canvas.addEventListener("pointermove", function (e) {
+    if (pointers[e.pointerId]) { pointers[e.pointerId].x = e.clientX; pointers[e.pointerId].y = e.clientY; }
+    if (pinch) { // two fingers → zoom the whole layout
+      var d = pointerDist();
+      if (d > 0 && pinch.dist > 0) { ZOOM = Math.max(0.45, Math.min(1.8, ZOOM * (d / pinch.dist))); pinch.dist = d; }
+      return;
+    }
     if (pan) {
       var pdx = e.clientX - pan.x, pdy = e.clientY - pan.y; pan.x = e.clientX; pan.y = e.clientY;
       nodes.forEach(function (nn) { nn.x += pdx; nn.y += pdy; });
@@ -593,20 +610,22 @@
     hoverName = drag ? drag.node.name : (function () { var n = pick(e.clientX, e.clientY); return n ? n.name : null; })();
     canvas.style.cursor = hoverName ? "pointer" : "default";
     if (!drag) return;
-    drag.x = e.clientX; drag.y = e.clientY;
-    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 5) drag.moved = true;
+    drag.x = e.clientX; drag.y = e.clientY; // physics moves the node to here
+    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > drag.thresh) drag.moved = true;
     var inRing = Math.hypot(e.clientX - cx, e.clientY - cy) < ringR;
     ringHot = inRing;
     if (inRing && !drag.branched) { drag.branched = true; expand(drag.node); focus(drag.node); pulseRing(); }
   });
-  function endDrag() {
+  function onPointerUp(e) {
+    delete pointers[e.pointerId];
+    if (pinch) { if (Object.keys(pointers).length < 2) pinch = null; return; }
     if (pan) { pan = null; return; }
     if (!drag) return;
     var d = drag; drag = null; ringHot = false;
-    if (!d.moved) { expand(d.node); focus(d.node); }
+    if (!d.moved) { expand(d.node); focus(d.node); } // a tap = branch + focus
   }
-  canvas.addEventListener("pointerup", endDrag);
-  canvas.addEventListener("pointercancel", endDrag);
+  canvas.addEventListener("pointerup", onPointerUp);
+  canvas.addEventListener("pointercancel", onPointerUp);
   function pulseRing() { ringHot = true; setTimeout(function () { if (!drag) ringHot = false; }, 260); }
 
   // ── chrome ────────────────────────────────────────────────────────────────
