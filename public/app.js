@@ -94,9 +94,12 @@
     canvas.width = W * dpr; canvas.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     cx = W / 2; cy = H / 2;
     PSCALE = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--pscale")) || 0.6;
-    ringR = Math.max(80, playerRadius()); // the ring frames the centre player
-    SZ = W < 640 ? 0.7 : 1; // smaller nodes + spacing on mobile
-    if (nodes && isMobile() !== lastMobile) updatePlugins(); // rebuild when crossing the breakpoint
+    SZ = W < 640 ? 0.6 : 1; // smaller group on mobile
+    ringR = isMobile() ? Math.max(50, Math.min(W, H) * 0.14) : Math.max(80, playerRadius());
+    if (nodes) {
+      nodes.forEach(measure);                              // node size differs desktop/mobile
+      if (isMobile() !== lastMobile) updatePlugins();      // rebuild when crossing the breakpoint
+    }
   }
   addEventListener("resize", resize); resize();
 
@@ -111,17 +114,19 @@
 
   var SANS = "system-ui,-apple-system,'Segoe UI',Roboto,sans-serif";
   var MONO = "ui-monospace,Menlo,Consolas,monospace";
-  var IMG = 54; // node avatar size (base; SZ applied at draw/physics time)
+  var IMGD = 81, IMGM = 54; // avatar size: desktop (branch nodes +50%) vs mobile
+  function nodeSize() { return isMobile() ? IMGM : IMGD; }
   function measure(node) {
+    var D = nodeSize();
     ctx.font = "700 13px " + SANS;
-    var label = node.name, maxW = 130;
+    var label = node.name, maxW = 150;
     if (ctx.measureText(label).width > maxW) {
       while (label.length > 1 && ctx.measureText(label + "…").width > maxW) label = label.slice(0, -1);
       label = label.replace(/\s+…$/, "") + "…";
     }
     node._label = label;
-    node.w = Math.max(IMG, ctx.measureText(label).width) + 16;
-    node.h = IMG + 22; // avatar + name line
+    node.w = Math.max(D, ctx.measureText(label).width) + 16;
+    node.h = D + 22; // avatar + name line
   }
 
   function getNode(name, spawn) {
@@ -338,7 +343,7 @@
     destroyControllers();   // tear down old player before rebuilding
     // Only the centre is a player now; neighbours are image nodes on the graph.
     if (!fn) bottom.innerHTML = "";
-    else buildColumn(bottom, [fn], fn, pluginGen, true); // centre player, on the node
+    else buildColumn(bottom, [fn], fn, pluginGen, !isMobile()); // desktop card on node, mobile compact bar
     lastMobile = isMobile();
 
     var statEl = document.getElementById("stat");
@@ -381,16 +386,17 @@
   function seed(name) {
     nodes.clear(); edges.length = 0; edgeSet.clear();
     var n = getNode(name, null);
-    n.x = cx; n.y = cy; n.alpha = 1;
+    if (isMobile()) { n.x = W * 0.42; n.y = H * 0.30; } else { n.x = cx; n.y = cy; }
+    n.alpha = 1;
     focus(n);
     setTimeout(function () { expand(n); }, reduced ? 0 : 220);
   }
 
   // ── physics ─────────────────────────────────────────────────────────────────
-  var REP = 13000, LINK_GAP = 64, LSPAN = 150, LK = 0.018, DAMP = 0.88, GRAV = 0.001, FOCUS_PULL = 0.02;
+  var REP = 13000, LINK_GAP = 64, LSPAN = 150, LK = 0.018, DAMP = 0.88, GRAV = 0, FOCUS_PULL = 0;
   var FOCUS_REP = 55000; // extra outward push from the centre node onto its branches
   var PADX = 34, PADY = 26;
-  var drag = null;
+  var drag = null, pan = null; // pan = dragging empty space to move the whole group
 
   function physics() {
     var arr = Array.from(nodes.values()), n = arr.length;
@@ -440,8 +446,8 @@
       nd.alpha += (nd.aT - nd.alpha) * 0.1;
     });
     for (var it = 0; it < 3; it++) collide(arr, n);
-    // hard keep-out: neighbours never sit under the centre player's footprint
-    if (focusNode && focusNode.aT > 0.001) {
+    // hard keep-out: neighbours never sit under the centre player's footprint (desktop only)
+    if (!isMobile() && focusNode && focusNode.aT > 0.001) {
       var rmin = playerRadius();
       for (var ki = 0; ki < n; ki++) {
         var kn = arr[ki];
@@ -508,10 +514,11 @@
 
     nodes.forEach(function (nd) {
       if (nd.alpha < 0.02) return;
-      if (nd.name === focusName) return; // the centre is drawn as the DOM player
+      if (nd.name === focusName && !isMobile()) return; // desktop: centre is the DOM player
       var isFocus = nd.name === focusName, isHover = nd.name === hoverName;
       var s = (isHover ? 1.06 : 1) * nd.grow * SZ;
       if (s < 0.02) return;
+      var D = nodeSize();
       ctx.globalAlpha = isHover ? Math.max(nd.alpha, 0.9) : nd.alpha;
       ctx.save();
       ctx.translate(nd.x, nd.y);
@@ -519,19 +526,19 @@
       var top = -nd.h / 2;
       // avatar (Spotify image, or a colored placeholder while it loads)
       ctx.save();
-      roundRect(-IMG / 2, top, IMG, IMG, 12);
+      roundRect(-D / 2, top, D, D, 12);
       ctx.clip();
       var img = getNodeImage(nd.name);
-      if (img) ctx.drawImage(img, -IMG / 2, top, IMG, IMG);
-      else { ctx.fillStyle = colorFor(nd); ctx.fillRect(-IMG / 2, top, IMG, IMG); }
+      if (img) ctx.drawImage(img, -D / 2, top, D, D);
+      else { ctx.fillStyle = colorFor(nd); ctx.fillRect(-D / 2, top, D, D); }
       ctx.restore();
       // ring (focus / hover highlight)
       ctx.lineWidth = (isFocus ? 3 : isHover ? 2 : 1) / s;
       ctx.strokeStyle = isFocus ? CYAN_BRIGHT : isHover ? "rgba(143,248,236,.6)" : "rgba(255,255,255,.14)";
-      roundRect(-IMG / 2, top, IMG, IMG, 12); ctx.stroke();
+      roundRect(-D / 2, top, D, D, 12); ctx.stroke();
       // name
       ctx.fillStyle = "#e7e3da"; ctx.textAlign = "center"; ctx.font = "700 13px " + SANS;
-      ctx.fillText(nd._label || nd.name, 0, top + IMG + 15);
+      ctx.fillText(nd._label || nd.name, 0, top + D + 15);
       ctx.restore();
       ctx.globalAlpha = 1;
     });
@@ -548,12 +555,16 @@
   function positionCenterPlayer() {
     var el = document.getElementById("pluginBottom");
     if (!el) return;
+    if (isMobile()) { // mobile: fixed bottom bar (CSS positions it)
+      el.style.display = "block"; el.style.left = ""; el.style.top = ""; el.style.transform = "";
+      return;
+    }
     var fn = focusName ? nodes.get(norm(focusName)) : null;
     if (!fn) { el.style.display = "none"; return; }
     el.style.display = "block";
     el.style.left = fn.x + "px";
     el.style.top = fn.y + "px";
-    el.style.transform = "translate(-50%, -50%)"; // the player IS the centre node
+    el.style.transform = "translate(-50%, -50%)"; // desktop: the player IS the centre node
   }
   function loop() { physics(); render(); positionCenterPlayer(); requestAnimationFrame(loop); }
 
@@ -569,11 +580,16 @@
   }
   canvas.addEventListener("pointerdown", function (e) {
     var nd = pick(e.clientX, e.clientY);
-    if (!nd) return;
-    drag = { node: nd, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, moved: false, branched: false };
+    if (nd) drag = { node: nd, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, moved: false, branched: false };
+    else pan = { x: e.clientX, y: e.clientY }; // grab empty space to move the whole group
     canvas.setPointerCapture(e.pointerId);
   });
   canvas.addEventListener("pointermove", function (e) {
+    if (pan) {
+      var pdx = e.clientX - pan.x, pdy = e.clientY - pan.y; pan.x = e.clientX; pan.y = e.clientY;
+      nodes.forEach(function (nn) { nn.x += pdx; nn.y += pdy; });
+      return;
+    }
     hoverName = drag ? drag.node.name : (function () { var n = pick(e.clientX, e.clientY); return n ? n.name : null; })();
     canvas.style.cursor = hoverName ? "pointer" : "default";
     if (!drag) return;
@@ -584,6 +600,7 @@
     if (inRing && !drag.branched) { drag.branched = true; expand(drag.node); focus(drag.node); pulseRing(); }
   });
   function endDrag() {
+    if (pan) { pan = null; return; }
     if (!drag) return;
     var d = drag; drag = null; ringHot = false;
     if (!d.moved) { expand(d.node); focus(d.node); }
