@@ -317,9 +317,9 @@
       left.innerHTML = right.innerHTML = "";
       buildColumn(bottom, [fn], fn, pluginGen, false);          // mobile: compact full-width bar
     } else {
-      buildColumn(left, list.slice(0, 4), fn, pluginGen, true); // centre + 3, scaled vertical cards
-      buildColumn(right, list.slice(4, 7), fn, pluginGen, true); // 3 more
-      bottom.innerHTML = "";
+      buildColumn(left, list.slice(1, 4), fn, pluginGen, true);  // 3 neighbours
+      buildColumn(right, list.slice(4, 7), fn, pluginGen, true); // 3 neighbours
+      buildColumn(bottom, [fn], fn, pluginGen, true);            // centre — docked below the graph
     }
     lastMobile = isMobile();
 
