@@ -38,11 +38,31 @@
     .plugins { position: fixed; top: 88px; bottom: 44px; width: 190px; display: flex; flex-direction: column; gap: 10px; z-index: 8; pointer-events: none; }
     .plugins-left { left: 12px; }
     .plugins-right { right: 12px; }
-    .plugin { background: rgba(19,19,24,.82); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+    .plugin { background: rgba(19,19,24,.82); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow: hidden; pointer-events: auto; cursor: pointer; }
+    .plugin:hover { border-color: var(--accent); }
+    .plugin.is-player { flex: 0 0 auto; }
     .plugin .p-name { font-weight: 700; font-size: 13px; line-height: 1.15; }
     .plugin .p-embed { flex: 1; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 10px; letter-spacing: .04em; color: var(--faint); border: 1px dashed var(--line); border-radius: 6px; text-align: center; padding: 4px; }
     .plugin.is-focus { border-color: var(--accent); }
+    .p-player { min-height: 152px; }
+    .p-player iframe { display: block; width: 100%; border: 0; border-radius: 8px; }
+    .pl-empty { flex: 1; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 10px; color: var(--faint); border: 1px dashed var(--line); border-radius: 6px; text-align: center; padding: 6px; min-height: 60px; }
     .plugin-bottom { display: none; }
+
+    /* modal shadow box — player + image + bio */
+    .modal[hidden] { display: none; }
+    .modal { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.62); backdrop-filter: blur(3px); }
+    .modal-card { position: relative; z-index: 1; width: min(460px, 100%); max-height: 90vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; box-shadow: 0 30px 80px rgba(0,0,0,.6); }
+    .modal-close { position: absolute; top: 8px; right: 12px; background: none; border: none; color: var(--muted); font-size: 24px; line-height: 1; cursor: pointer; }
+    .modal-close:hover { color: var(--ink); }
+    .modal-head { display: flex; gap: 14px; align-items: center; margin-bottom: 14px; padding-right: 24px; }
+    .modal-img { width: 84px; height: 84px; border-radius: 10px; object-fit: cover; background: #202028; flex: 0 0 auto; }
+    .modal-name { font-size: 20px; font-weight: 800; letter-spacing: -.01em; line-height: 1.1; }
+    .modal-genres { font-family: var(--mono); font-size: 11px; color: var(--accent-ink, var(--muted)); margin-top: 5px; }
+    .modal-player { margin-bottom: 14px; min-height: 80px; }
+    .modal-player iframe { display: block; width: 100%; border: 0; border-radius: 10px; }
+    .modal-bio { font-size: 13.5px; line-height: 1.6; color: var(--muted); }
 
     @media (max-width: 900px) { .plugins { width: 148px; } }
     @media (max-width: 640px) {
@@ -76,6 +96,22 @@
   <div class="plugins plugins-left" id="pluginsLeft"></div>
   <div class="plugins plugins-right" id="pluginsRight"></div>
   <div class="plugin-bottom" id="pluginBottom"></div>
+
+  <div class="modal" id="modal" hidden>
+    <div class="modal-backdrop" id="modalBackdrop"></div>
+    <div class="modal-card">
+      <button class="modal-close" id="modalClose" type="button" aria-label="Close">×</button>
+      <div class="modal-head">
+        <img class="modal-img" id="modalImg" alt="" />
+        <div>
+          <div class="modal-name" id="modalName"></div>
+          <div class="modal-genres" id="modalGenres"></div>
+        </div>
+      </div>
+      <div class="modal-player" id="modalPlayer"></div>
+      <div class="modal-bio" id="modalBio"></div>
+    </div>
+  </div>
 
   <div class="stat" id="stat"></div>
   <div class="hint"><b>Click</b> a node to branch its similars · or <b>drag</b> it into the centre ring</div>

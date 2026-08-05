@@ -223,12 +223,37 @@
     }
     return 0;
   }
-  function slotHTML(nd, isFocus) {
-    var label = isFocus ? "centre" : (Math.round(matchToFocus(nd) * 100) + "% match");
-    return '<div class="plugin' + (isFocus ? " is-focus" : "") + '">' +
-      '<div class="p-name">' + esc(nd.name) + '</div>' +
-      '<div class="p-embed">Spotify · ' + label + '</div></div>';
+  // Spotify: resolve name -> { spotify:{id,image,genres,...}, bio } via /api/artist,
+  // memoized so navigating back doesn't refetch. Player is Spotify's embed iframe.
+  var artistCache = {};
+  var centerId = null, centerPlayerName = null;
+
+  function embedSrc(id) { return "https://open.spotify.com/embed/artist/" + id + "?utm_source=generator&theme=0"; }
+  function playerFrame(id, h) {
+    return '<iframe src="' + embedSrc(id) + '" width="100%" height="' + h +
+      '" loading="lazy" allow="autoplay; encrypted-media; clipboard-write; picture-in-picture"></iframe>';
   }
+  function fetchArtist(name) {
+    var k = norm(name);
+    if (artistCache[k]) return artistCache[k];
+    artistCache[k] = fetch("/api/artist?name=" + encodeURIComponent(name))
+      .then(function (r) { return r.ok ? r.json() : { name: name, spotify: null, bio: null }; })
+      .catch(function () { return { name: name, spotify: null, bio: null }; });
+    return artistCache[k];
+  }
+
+  function cardHTML(nd, isFocus) {
+    var label = isFocus ? "centre — tap to play" : (Math.round(matchToFocus(nd) * 100) + "% match");
+    return '<div class="plugin' + (isFocus ? " is-focus" : "") + '" data-artist="' + esc(nd.name) + '">' +
+      '<div class="p-name">' + esc(nd.name) + '</div>' +
+      '<div class="p-embed">' + label + '</div></div>';
+  }
+  function centerHTML(nd) {
+    return '<div class="plugin is-focus is-player" data-artist="' + esc(nd.name) + '">' +
+      '<div class="p-name">' + esc(nd.name) + '</div>' +
+      '<div class="p-player center-player"><div class="pl-empty">loading player…</div></div></div>';
+  }
+
   function updatePlugins() {
     var left = document.getElementById("pluginsLeft");
     var right = document.getElementById("pluginsRight");
@@ -238,13 +263,71 @@
     var neigh = [];
     nodes.forEach(function (nd) { if (nd.dist === 1) neigh.push(nd); });
     neigh.sort(function (a, b) { return matchToFocus(b) - matchToFocus(a); });
-    var list = (fn ? [fn].concat(neigh) : neigh).slice(0, 7); // node + 6
-    left.innerHTML = list.slice(0, 4).map(function (nd) { return slotHTML(nd, nd === fn); }).join("");
-    right.innerHTML = list.slice(4, 7).map(function (nd) { return slotHTML(nd, nd === fn); }).join("");
-    bottom.innerHTML = fn ? slotHTML(fn, true) : "";
+    var list = (fn ? [fn].concat(neigh) : neigh).slice(0, 7); // centre + 6
+
+    if (fn) {
+      // desktop: centre = live inline player, then 3 neighbour cards left / 3 right
+      left.innerHTML = centerHTML(fn) + list.slice(1, 4).map(function (nd) { return cardHTML(nd, false); }).join("");
+      right.innerHTML = list.slice(4, 7).map(function (nd) { return cardHTML(nd, false); }).join("");
+      bottom.innerHTML = cardHTML(fn, true); // mobile: tap the centre card to open the player
+      ensureCenterPlayer(fn.name);
+    } else {
+      left.innerHTML = right.innerHTML = bottom.innerHTML = "";
+    }
 
     var statEl = document.getElementById("stat");
     if (statEl) statEl.textContent = nodes.size + " artists · " + edges.length + " links · seed: " + (seedName || "—") + " · " + (USE_API ? "live" : "demo data");
+  }
+
+  function ensureCenterPlayer(name) {
+    var box = document.querySelector(".center-player");
+    if (!box) return;
+    centerPlayerName = name;
+    fetchArtist(name).then(function (info) {
+      if (centerPlayerName !== name) return; // focus moved on while fetching
+      var b = document.querySelector(".center-player");
+      if (!b) return;
+      if (info.spotify && info.spotify.id) {
+        centerId = info.spotify.id;
+        b.innerHTML = playerFrame(info.spotify.id, 152);
+      } else {
+        centerId = null;
+        b.innerHTML = '<div class="pl-empty">' + (info.configured === false ? "Add Spotify keys to play" : "Not on Spotify") + "</div>";
+      }
+    });
+  }
+  function pauseCenter() { var f = document.querySelector(".center-player iframe"); if (f) f.src = "about:blank"; }
+  function restoreCenter() { if (centerId) { var f = document.querySelector(".center-player iframe"); if (f) f.src = embedSrc(centerId); } }
+
+  async function openModal(name) {
+    var modal = document.getElementById("modal");
+    if (!modal) return;
+    pauseCenter(); // only one player sounds at a time
+    document.getElementById("modalName").textContent = name;
+    document.getElementById("modalGenres").textContent = "";
+    document.getElementById("modalImg").style.display = "none";
+    document.getElementById("modalBio").textContent = "Loading…";
+    document.getElementById("modalPlayer").innerHTML = "";
+    modal.hidden = false;
+
+    var info = await fetchArtist(name);
+    if (modal.hidden) return; // closed while loading
+    var sp = info.spotify;
+    var img = document.getElementById("modalImg");
+    if (sp && sp.image) { img.src = sp.image; img.style.display = "block"; } else { img.style.display = "none"; }
+    document.getElementById("modalName").textContent = (sp && sp.name) || info.name || name;
+    document.getElementById("modalGenres").textContent = sp && sp.genres ? sp.genres.slice(0, 3).join(" · ") : "";
+    document.getElementById("modalBio").textContent = info.bio || "No bio available.";
+    document.getElementById("modalPlayer").innerHTML = (sp && sp.id)
+      ? playerFrame(sp.id, 352)
+      : '<div class="pl-empty">' + (info.configured === false ? "Add SPOTIFY_CLIENT_ID / SECRET in Netlify to enable playback." : "Not available on Spotify.") + "</div>";
+  }
+  function closeModal() {
+    var modal = document.getElementById("modal");
+    if (!modal) return;
+    document.getElementById("modalPlayer").innerHTML = ""; // stop the modal player
+    modal.hidden = true;
+    restoreCenter();
   }
 
   function seed(name) {
@@ -441,6 +524,21 @@
   document.getElementById("reset").addEventListener("click", function () { doSeed("The Velvet Underground"); });
 
   // ── boot ────────────────────────────────────────────────────────────────────
+  // plugin clicks open the modal player; clicks on the embed iframe don't bubble,
+  // so tapping a card's text opens the modal while the inline player stays usable.
+  ["pluginsLeft", "pluginsRight", "pluginBottom"].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener("click", function (e) {
+      var p = e.target.closest(".plugin");
+      if (p && p.dataset.artist) openModal(p.dataset.artist);
+    });
+  });
+  var modalClose = document.getElementById("modalClose");
+  var modalBackdrop = document.getElementById("modalBackdrop");
+  if (modalClose) modalClose.addEventListener("click", closeModal);
+  if (modalBackdrop) modalBackdrop.addEventListener("click", closeModal);
+  addEventListener("keydown", function (e) { if (e.key === "Escape") closeModal(); });
+
   var subEl = document.getElementById("sub");
   if (subEl) subEl.textContent = "crowd similarity · " + (USE_API ? "last.fm live" : "demo data");
   doSeed("The Velvet Underground");

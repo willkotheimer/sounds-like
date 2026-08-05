@@ -23,6 +23,16 @@ netlify.toml       publish dir, /api/* → functions redirect, CDN cache
 4. Turn **off** Netlify's own auto-build for the site (so Actions owns deploys, no double-deploy).
 5. Push to `main`. The workflow deploys `public/` + the functions. Visit the site — the tree runs on the built-in demo set.
 
+### Spotify players (optional but recommended)
+
+Each node gets a Spotify player + image, with a bio from Last.fm. Register an app at
+<https://developer.spotify.com/dashboard>, then add to Netlify env vars:
+`SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET`. Client Credentials flow — **no
+redirect URI or user login**. Notes: embeds play 30-second previews for logged-out
+visitors (full tracks require a signed-in Spotify Premium viewer), and browsers block
+autoplay-with-sound, so the centre player loads ready and the visitor taps play. Until
+the keys are set, the tree works fine and players show a graceful "add Spotify keys" note.
+
 ### 2 · Add the Last.fm key
 
 - Get a key at <https://www.last.fm/api/account/create>. Read methods (`artist.getSimilar` / `artist.search`) need **only the key** — no OAuth, no callback URL.
