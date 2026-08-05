@@ -389,7 +389,7 @@
     var n = getNode(name, null);
     if (isMobile()) { // seed lands just southwest of the reset button
       var rb = document.getElementById("reset");
-      if (rb) { var r = rb.getBoundingClientRect(); n.x = r.left - 24; n.y = r.bottom + 48; }
+      if (rb) { var r = rb.getBoundingClientRect(); n.x = r.left - 24; n.y = r.top + 20; }
       else { n.x = W * 0.6; n.y = H * 0.24; }
     } else { n.x = cx; n.y = cy; }
     n.alpha = 1;
