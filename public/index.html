@@ -50,8 +50,8 @@
     .p-player.scaled { width: calc(300px * var(--pscale)); height: calc(352px * var(--pscale)); overflow: hidden; }
     .p-player.scaled iframe { width: 300px; height: 352px; transform: scale(var(--pscale)); transform-origin: top left; border-radius: 12px; }
     .pl-empty { flex: 1; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 10px; color: var(--faint); border: 1px dashed var(--line); border-radius: 6px; text-align: center; padding: 6px; min-height: 60px; }
-    /* the centre/selected player docks below the graph (bottom-centre) on desktop */
-    .plugin-bottom { display: block; position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); width: calc(300px * var(--pscale) + 26px); z-index: 8; pointer-events: auto; }
+    /* the centre/selected player rides on the focus node (JS sets left/top on desktop) */
+    .plugin-bottom { display: block; position: fixed; transform: translateX(-50%); width: calc(300px * var(--pscale) + 26px); z-index: 8; pointer-events: auto; }
 
     /* modal shadow box — player + image + bio */
     .modal[hidden] { display: none; }
@@ -70,7 +70,7 @@
 
     @media (max-width: 640px) {
       .plugins-left, .plugins-right { display: none; }
-      .plugin-bottom { left: 10px; right: 10px; transform: none; width: auto; } /* full-width bar on mobile */
+      .plugin-bottom { left: 10px; right: 10px; top: auto; bottom: 40px; transform: none; width: auto; } /* full-width bar on mobile */
       .hud { flex-wrap: wrap; padding: 10px 12px; gap: 8px 12px; }
       .title h1 { font-size: 14px; }
       .title .sub { font-size: 10px; }

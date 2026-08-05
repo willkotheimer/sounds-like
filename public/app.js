@@ -272,7 +272,8 @@
             controllers.forEach(function (c) { if (c !== controller) { try { c.pause(); } catch (_) {} } });
           }
         });
-        if (autoplay) { try { controller.play(); } catch (e) {} } // best-effort; browsers gate autoplay-with-sound
+        // autoplay must wait for the player to be ready (else play() no-ops); still browser-gated for sound
+        if (autoplay) controller.addListener("ready", function () { try { controller.play(); } catch (e) {} });
       });
     });
   }
@@ -370,11 +371,13 @@
 
   // ── physics ─────────────────────────────────────────────────────────────────
   var REP = 13000, LINK_GAP = 64, LSPAN = 150, LK = 0.018, DAMP = 0.88, GRAV = 0.001, FOCUS_PULL = 0.02;
+  var FOCUS_REP = 55000; // extra outward push from the centre node onto its branches
   var PADX = 34, PADY = 26;
   var drag = null;
 
   function physics() {
     var arr = Array.from(nodes.values()), n = arr.length;
+    var focusNode = focusName ? nodes.get(norm(focusName)) : null;
 
     for (var i = 0; i < n; i++) {
       var a = arr[i];
@@ -389,6 +392,17 @@
         var ux = dx / d, uy = dy / d;
         a.vx += ux * f * 0.016 * gg * SZ; a.vy += uy * f * 0.016 * gg * SZ;
         b.vx -= ux * f * 0.016 * gg * SZ; b.vy -= uy * f * 0.016 * gg * SZ;
+      }
+    }
+    // the centre node pushes its neighbours/branches outward for breathing room
+    if (focusNode && focusNode.aT > 0.001) {
+      for (var fi = 0; fi < n; fi++) {
+        var fnode = arr[fi];
+        if (fnode === focusNode || fnode.aT <= 0.001) continue;
+        var fdx = fnode.x - focusNode.x, fdy = fnode.y - focusNode.y, fd2 = fdx * fdx + fdy * fdy;
+        if (fd2 < 900) fd2 = 900;
+        var ff = FOCUS_REP / fd2, fd = Math.sqrt(fd2);
+        fnode.vx += (fdx / fd) * ff * fnode.grow; fnode.vy += (fdy / fd) * ff * fnode.grow;
       }
     }
     edges.forEach(function (e) {
@@ -500,7 +514,18 @@
     ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
   }
-  function loop() { physics(); render(); requestAnimationFrame(loop); }
+  // The centre player floats just below the focus node (desktop); on mobile it's
+  // a fixed bottom bar (CSS), so we clear the inline positioning there.
+  function positionCenterPlayer() {
+    var el = document.getElementById("pluginBottom");
+    if (!el) return;
+    if (isMobile()) { el.style.left = ""; el.style.top = ""; return; }
+    var fn = focusName ? nodes.get(norm(focusName)) : null;
+    if (!fn) return;
+    el.style.left = fn.x + "px";
+    el.style.top = (fn.y + (fn.h * SZ) / 2 + 12) + "px";
+  }
+  function loop() { physics(); render(); positionCenterPlayer(); requestAnimationFrame(loop); }
 
   // ── interaction ─────────────────────────────────────────────────────────────
   function pick(mx, my) {
