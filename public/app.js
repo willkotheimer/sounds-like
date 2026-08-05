@@ -3,17 +3,18 @@
   var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   // ── DATA SOURCE SEAM ────────────────────────────────────────────────────────
-  // Step 3 ("wire it up"): flip USE_API to true once LASTFM_API_KEY is set in the
-  // Netlify dashboard. Everything else is already API-shaped — fetchSimilar and
-  // fetchSearch return exactly what the mock returns.
   var USE_API = true;
+  var EXPAND_K = 6;   // children shown per expand
+  var POOL = 25;      // similars fetched, then diversity-sampled down to EXPAND_K
+  var CYAN = "#47e0d2";
+  var CYAN_BRIGHT = "#8ff8ec";
 
   async function fetchSimilar(name) {
     if (!USE_API) {
       var d = DATA[name];
       return d ? d.sim.map(function (s) { return { name: s[0], match: s[1] }; }) : [];
     }
-    var res = await fetch("/api/similar?artist=" + encodeURIComponent(name) + "&limit=" + EXPAND_K);
+    var res = await fetch("/api/similar?artist=" + encodeURIComponent(name) + "&limit=" + POOL);
     if (res.status === 429) throw new Error("Rate limited — try again in a moment");
     if (!res.ok) {
       var b = await res.json().catch(function () { return {}; });
@@ -34,6 +35,20 @@
     if (!res.ok) return [];
     var data = await res.json();
     return data.results || [];
+  }
+
+  // Diversity sampling — mega-artists (e.g. The Beatles) return their own members
+  // at the very top by match, so a strict top-K is a family reunion. Keep the top
+  // few, then sample evenly across the tail to pull in the wider scene.
+  function selectDiverse(list, k) {
+    if (!list || list.length <= k) return (list || []).slice();
+    var topN = Math.min(3, k);
+    var picked = list.slice(0, topN);
+    var rest = list.slice(topN);
+    var need = k - topN;
+    var step = rest.length / need;
+    for (var i = 0; i < need; i++) picked.push(rest[Math.floor(i * step + step / 2)]);
+    return picked;
   }
 
   // ── mock data (Last.fm getSimilar shape: name + match 0..1) ─────────────────
@@ -69,15 +84,15 @@
     "Mission of Burma": { tag: "post-punk", sim: [["Wire",.84],["Gang of Four",.8],["Pere Ubu",.8]] },
     "Jonathan Richman": { tag: "proto-punk", sim: [["The Modern Lovers",.95],["The Velvet Underground",.8]] }
   };
-  var EXPAND_K = 6;
 
   // ── canvas ────────────────────────────────────────────────────────────────
   var canvas = document.getElementById("c"), ctx = canvas.getContext("2d");
-  var W = 0, H = 0, dpr = 1, cx = 0, cy = 0, ringR = 120;
+  var W = 0, H = 0, dpr = 1, cx = 0, cy = 0, ringR = 120, SZ = 1;
   function resize() {
     W = innerWidth; H = innerHeight; dpr = Math.min(2, devicePixelRatio || 1);
     canvas.width = W * dpr; canvas.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    cx = W / 2; cy = H / 2; ringR = Math.max(70, Math.min(W, H) * 0.15);
+    cx = W / 2; cy = H / 2; ringR = Math.max(60, Math.min(W, H) * 0.15);
+    SZ = W < 640 ? 0.7 : 1; // smaller nodes + spacing on mobile
   }
   addEventListener("resize", resize); resize();
 
@@ -87,14 +102,12 @@
   var edgeSet = new Set();
   var focusName = null;
 
-  // De-dupe key: Last.fm can return the same act under slightly different names
-  // ("The Velvet Underground" vs "Velvet Underground"), so we key nodes on a
-  // normalized form while keeping the first-seen display name.
   function norm(s) { return String(s).trim().toLowerCase().replace(/^the\s+/, ""); }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (m) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[m]; }); }
 
   var SANS = "system-ui,-apple-system,'Segoe UI',Roboto,sans-serif";
   var MONO = "ui-monospace,Menlo,Consolas,monospace";
-  function measure(node) {
+  function measure(node) { // base size; SZ is applied at draw/physics time
     ctx.font = "700 14px " + SANS;
     var wName = ctx.measureText(node.name).width;
     ctx.font = "10px " + MONO;
@@ -113,7 +126,7 @@
       x: spawn ? spawn.x + (Math.random() - 0.5) * 14 : cx,
       y: spawn ? spawn.y + (Math.random() - 0.5) * 14 : cy,
       vx: 0, vy: 0, alpha: 0, aT: 1, dist: Infinity,
-      grow: spawn ? 0 : 1, growDelay: 0, // a child starts as a bud at the parent and blossoms open
+      grow: spawn ? 0 : 1, growDelay: 0,
       expanded: false, loading: false,
       hasData: USE_API || !!d, matchToParent: null, w: 60, h: 40
     };
@@ -136,7 +149,7 @@
       var sims = await fetchSimilar(node.name);
       node.expanded = true;
       if (!sims.length) { toast("No similars found for " + node.name); return; }
-      sims.slice(0, EXPAND_K).forEach(function (s, i) {
+      selectDiverse(sims, EXPAND_K).forEach(function (s, i) {
         var childName = s.name, match = s.match;
         var existed = nodes.has(norm(childName));
         var child = getNode(childName, node);
@@ -147,27 +160,30 @@
           else { child.growDelay = i * 5; } // petals open in sequence
         }
       });
-      recomputeDepths(); // new nodes/edges shift everyone's distance to centre
+      recomputeDepths();
     } catch (e) {
       toast((e && e.message) || "Couldn't load similars");
     } finally {
       node.loading = false;
     }
   }
-  function focus(node) { focusName = node.name; recomputeDepths(); }
 
-  // "Gradual replacement of the centre": every node's target opacity is a
-  // function of its shortest-path hop distance from the current focus. The
-  // clicked node is the centre (full brightness); the path behind and any side
-  // branches fade with distance but never vanish (floor ~0.1). A far node
-  // re-brightens the instant a new edge shortens its distance to centre.
+  function focus(node) {
+    focusName = node.name;
+    var qi = document.getElementById("q");
+    if (qi && document.activeElement !== qi) qi.value = node.name; // search box mirrors the centre
+    recomputeDepths();
+  }
+
+  // "Gradual replacement of the centre": opacity = f(hop-distance from focus).
+  // Beyond 2 hops a node fully disappears (and drops out of physics/hit-testing),
+  // reappearing the instant a new edge brings it back within range.
   function nodeAlpha(d) {
-    if (!isFinite(d)) return 0.1;   // disconnected / not yet reachable
-    if (d <= 0) return 1;           // the centre
-    if (d === 1) return 0.68;
+    if (!isFinite(d)) return 0;
+    if (d <= 0) return 1;
+    if (d === 1) return 0.7;
     if (d === 2) return 0.4;
-    if (d === 3) return 0.22;
-    return 0.12;                    // 4+ hops out — almost gone
+    return 0; // 3+ hops — gone
   }
 
   function recomputeDepths() {
@@ -189,16 +205,47 @@
         var k = queue.shift(), kn = nodes.get(k), neigh = adj.get(k) || [];
         for (var i = 0; i < neigh.length; i++) {
           var nk = neigh[i];
-          if (!seen[nk]) {
-            seen[nk] = 1;
-            var nn = nodes.get(nk);
-            if (nn) { nn.dist = kn.dist + 1; queue.push(nk); }
-          }
+          if (!seen[nk]) { seen[nk] = 1; var nn = nodes.get(nk); if (nn) { nn.dist = kn.dist + 1; queue.push(nk); } }
         }
       }
     }
     nodes.forEach(function (nd) { nd.aT = nodeAlpha(nd.dist); });
     edges.forEach(function (e) { e.aT = nodeAlpha(Math.max(e.a.dist, e.b.dist)); });
+    updatePlugins();
+  }
+
+  // ── plugin slots (placeholders now; Spotify embeds later) ───────────────────
+  function matchToFocus(nd) {
+    if (!focusName) return 0;
+    var fk = norm(focusName), nk = norm(nd.name);
+    for (var i = 0; i < edges.length; i++) {
+      var e = edges[i], a = norm(e.a.name), b = norm(e.b.name);
+      if ((a === fk && b === nk) || (a === nk && b === fk)) return e.match;
+    }
+    return 0;
+  }
+  function slotHTML(nd, isFocus) {
+    var label = isFocus ? "centre" : (Math.round(matchToFocus(nd) * 100) + "% match");
+    return '<div class="plugin' + (isFocus ? " is-focus" : "") + '">' +
+      '<div class="p-name">' + esc(nd.name) + '</div>' +
+      '<div class="p-embed">Spotify · ' + label + '</div></div>';
+  }
+  function updatePlugins() {
+    var left = document.getElementById("pluginsLeft");
+    var right = document.getElementById("pluginsRight");
+    var bottom = document.getElementById("pluginBottom");
+    if (!left || !right || !bottom) return;
+    var fn = focusName ? nodes.get(norm(focusName)) : null;
+    var neigh = [];
+    nodes.forEach(function (nd) { if (nd.dist === 1) neigh.push(nd); });
+    neigh.sort(function (a, b) { return matchToFocus(b) - matchToFocus(a); });
+    var list = (fn ? [fn].concat(neigh) : neigh).slice(0, 7); // node + 6
+    left.innerHTML = list.slice(0, 4).map(function (nd) { return slotHTML(nd, nd === fn); }).join("");
+    right.innerHTML = list.slice(4, 7).map(function (nd) { return slotHTML(nd, nd === fn); }).join("");
+    bottom.innerHTML = fn ? slotHTML(fn, true) : "";
+
+    var statEl = document.getElementById("stat");
+    if (statEl) statEl.textContent = nodes.size + " artists · " + edges.length + " links · seed: " + (seedName || "—") + " · " + (USE_API ? "live" : "demo data");
   }
 
   function seed(name) {
@@ -209,7 +256,7 @@
     setTimeout(function () { expand(n); }, reduced ? 0 : 220);
   }
 
-  // ── physics: spread forces + a HARD non-overlap constraint ──────────────────
+  // ── physics ─────────────────────────────────────────────────────────────────
   var REP = 13000, LINK_GAP = 64, LSPAN = 150, LK = 0.018, DAMP = 0.88, GRAV = 0.001, FOCUS_PULL = 0.02;
   var PADX = 34, PADY = 26;
   var drag = null;
@@ -219,20 +266,23 @@
 
     for (var i = 0; i < n; i++) {
       var a = arr[i];
+      if (a.aT <= 0.001) continue; // disappeared node — inert
       for (var j = i + 1; j < n; j++) {
         var b = arr[j];
+        if (b.aT <= 0.001) continue;
         var dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy;
         if (d2 > 360000) continue;
-        if (d2 < 16) d2 = 16; // floor avoids a blow-up when buds spawn near-coincident
-        var f = REP / d2, d = Math.sqrt(d2), gg = a.grow * b.grow; // buds barely repel until grown
+        if (d2 < 16) d2 = 16;
+        var f = REP / d2, d = Math.sqrt(d2), gg = a.grow * b.grow;
         var ux = dx / d, uy = dy / d;
-        a.vx += ux * f * 0.016 * gg; a.vy += uy * f * 0.016 * gg;
-        b.vx -= ux * f * 0.016 * gg; b.vy -= uy * f * 0.016 * gg;
+        a.vx += ux * f * 0.016 * gg * SZ; a.vy += uy * f * 0.016 * gg * SZ;
+        b.vx -= ux * f * 0.016 * gg * SZ; b.vy -= uy * f * 0.016 * gg * SZ;
       }
     }
     edges.forEach(function (e) {
+      if (e.a.aT <= 0.001 || e.b.aT <= 0.001) return;
       var dx = e.b.x - e.a.x, dy = e.b.y - e.a.y, d = Math.hypot(dx, dy) || 0.01;
-      var target = (e.a.w + e.b.w) / 2 + LINK_GAP + (1 - e.match) * LSPAN;
+      var target = ((e.a.w + e.b.w) / 2 + LINK_GAP + (1 - e.match) * LSPAN) * SZ;
       var diff = (d - target) / d * LK;
       var mx = dx * diff, my = dy * diff;
       e.a.vx += mx; e.a.vy += my; e.b.vx -= mx; e.b.vy -= my;
@@ -243,8 +293,8 @@
       if (drag && drag.node === nd) { nd.x = drag.x; nd.y = drag.y; nd.vx = nd.vy = 0; }
       else { nd.vx *= DAMP; nd.vy *= DAMP; nd.x += nd.vx; nd.y += nd.vy; }
       if (nd.growDelay > 0) nd.growDelay--;
-      else if (nd.grow < 1) nd.grow += (1 - nd.grow) * 0.14; // bud → full size
-      nd.alpha += (nd.aT - nd.alpha) * 0.1; // ease toward distance-based opacity
+      else if (nd.grow < 1) nd.grow += (1 - nd.grow) * 0.14;
+      nd.alpha += (nd.aT - nd.alpha) * 0.1;
     });
     for (var it = 0; it < 3; it++) collide(arr, n);
     edges.forEach(function (e) { e.alpha += (e.aT - e.alpha) * 0.1; });
@@ -253,12 +303,14 @@
   function collide(arr, n) {
     for (var i = 0; i < n; i++) {
       var a = arr[i];
+      if (a.aT <= 0.001) continue;
       for (var j = i + 1; j < n; j++) {
         var b = arr[j];
+        if (b.aT <= 0.001) continue;
         var dx = b.x - a.x, dy = b.y - a.y;
-        var ag = a.grow, bg = b.grow, mg = Math.min(ag, bg); // collide at current (growing) size
-        var ox = (a.w * ag + b.w * bg) / 2 + PADX * mg - Math.abs(dx);
-        var oy = (a.h * ag + b.h * bg) / 2 + PADY * mg - Math.abs(dy);
+        var ag = a.grow, bg = b.grow, mg = Math.min(ag, bg);
+        var ox = ((a.w * ag + b.w * bg) / 2 + PADX * mg) * SZ - Math.abs(dx);
+        var oy = ((a.h * ag + b.h * bg) / 2 + PADY * mg) * SZ - Math.abs(dy);
         if (ox <= 0 || oy <= 0) continue;
         var aFix = drag && drag.node === a, bFix = drag && drag.node === b;
         if (ox < oy) {
@@ -282,29 +334,31 @@
     ctx.clearRect(0, 0, W, H);
 
     ctx.setLineDash([4, 6]); ctx.lineWidth = 1.5;
-    ctx.strokeStyle = ringHot ? "rgba(71,224,210,.8)" : "rgba(120,120,135,.32)";
+    ctx.strokeStyle = ringHot ? "rgba(143,248,236,.9)" : "rgba(143,248,236,.4)";
     ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, 6.2832); ctx.stroke();
     ctx.setLineDash([]);
 
     edges.forEach(function (e) {
+      if (e.alpha < 0.02) return;
       var focused = (e.a.name === focusName || e.b.name === focusName);
-      ctx.globalAlpha = e.alpha * (0.16 + e.match * 0.5);
-      ctx.strokeStyle = focused ? "rgba(71,224,210,.9)" : "rgba(150,155,170,.9)";
+      ctx.globalAlpha = e.alpha * (0.18 + e.match * 0.55);
+      ctx.strokeStyle = focused ? "rgba(143,248,236,1)" : "rgba(143,248,236,.7)";
       ctx.lineWidth = 1 + e.match * 2.4;
       ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y); ctx.stroke();
       if (hoverName && !focused && (e.a.name === hoverName || e.b.name === hoverName)) {
-        ctx.globalAlpha = e.alpha * 0.8;
-        ctx.fillStyle = "#9aa"; ctx.font = "10px " + MONO; ctx.textAlign = "center";
+        ctx.globalAlpha = e.alpha * 0.85;
+        ctx.fillStyle = "#bfeee9"; ctx.font = "10px " + MONO; ctx.textAlign = "center";
         ctx.fillText(Math.round(e.match * 100) + "%", (e.a.x + e.b.x) / 2, (e.a.y + e.b.y) / 2 - 3);
       }
     });
     ctx.globalAlpha = 1;
 
     nodes.forEach(function (nd) {
+      if (nd.alpha < 0.02) return;
       var isFocus = nd.name === focusName, isHover = nd.name === hoverName;
-      var s = (isHover ? 1.06 : 1) * nd.grow; // grow: 0 (bud) → 1 (open)
-      if (s < 0.03) return;
-      ctx.globalAlpha = isHover ? Math.max(nd.alpha, 0.9) : nd.alpha; // faded nodes stay readable on hover
+      var s = (isHover ? 1.06 : 1) * nd.grow * SZ;
+      if (s < 0.02) return;
+      ctx.globalAlpha = isHover ? Math.max(nd.alpha, 0.9) : nd.alpha;
       ctx.save();
       ctx.translate(nd.x, nd.y);
       ctx.scale(s, s);
@@ -313,8 +367,8 @@
       ctx.fillStyle = isFocus ? "#f4f1e9" : "#e7e3da";
       ctx.fill();
       if (isFocus || isHover) {
-        ctx.lineWidth = (isFocus ? 2 : 1.2) / s; // constant visual stroke as it scales
-        ctx.strokeStyle = isFocus ? "#47e0d2" : "rgba(71,224,210,.5)";
+        ctx.lineWidth = (isFocus ? 2 : 1.2) / s;
+        ctx.strokeStyle = isFocus ? CYAN_BRIGHT : "rgba(143,248,236,.6)";
         ctx.stroke();
       }
       ctx.fillStyle = "#141418"; ctx.textAlign = "center";
@@ -326,8 +380,6 @@
       ctx.restore();
       ctx.globalAlpha = 1;
     });
-
-    statEl.textContent = nodes.size + " artists · " + edges.length + " links · seed: " + (seedName || "—") + " · " + (USE_API ? "live" : "demo data");
   }
   function roundRect(x, y, w, h, r) {
     ctx.beginPath();
@@ -342,7 +394,9 @@
   function pick(mx, my) {
     var hit = null;
     nodes.forEach(function (nd) {
-      if (mx >= nd.x - nd.w / 2 && mx <= nd.x + nd.w / 2 && my >= nd.y - nd.h / 2 && my <= nd.y + nd.h / 2) hit = nd;
+      if (nd.aT <= 0.001) return; // can't click a disappeared node
+      var hw = nd.w * SZ / 2, hh = nd.h * SZ / 2;
+      if (mx >= nd.x - hw && mx <= nd.x + hw && my >= nd.y - hh && my <= nd.y + hh) hit = nd;
     });
     return hit;
   }
@@ -372,8 +426,6 @@
   function pulseRing() { ringHot = true; setTimeout(function () { if (!drag) ringHot = false; }, 260); }
 
   // ── chrome ────────────────────────────────────────────────────────────────
-  var statEl = document.getElementById("stat");
-  var subEl = document.getElementById("sub");
   var toastEl = document.getElementById("toast"), toastT = null;
   function toast(m) { toastEl.textContent = m; toastEl.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(function () { toastEl.classList.remove("on"); }, 1800); }
   var seedName = null;
@@ -390,6 +442,7 @@
   document.getElementById("reset").addEventListener("click", function () { doSeed("The Velvet Underground"); });
 
   // ── boot ────────────────────────────────────────────────────────────────────
+  var subEl = document.getElementById("sub");
   if (subEl) subEl.textContent = "crowd similarity · " + (USE_API ? "last.fm live" : "demo data");
   doSeed("The Velvet Underground");
   requestAnimationFrame(loop);

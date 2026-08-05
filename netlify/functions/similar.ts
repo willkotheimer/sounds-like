@@ -8,7 +8,7 @@ const UA = "SoundsLikeTree/0.1 (+https://github.com/)";
 
 export const handler: Handler = async (event) => {
   const artist = (event.queryStringParameters?.artist || "").trim();
-  const limit = Math.min(Math.max(Number(event.queryStringParameters?.limit) || 8, 1), 24);
+  const limit = Math.min(Math.max(Number(event.queryStringParameters?.limit) || 25, 1), 50);
   if (!artist) return json(400, { error: "Missing 'artist' query parameter." });
 
   const key = process.env.LASTFM_API_KEY;

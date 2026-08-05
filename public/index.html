@@ -33,6 +33,29 @@
 
     .toast { position: fixed; top: 64px; left: 50%; transform: translateX(-50%) translateY(-8px); background: var(--panel); border: 1px solid var(--line); color: var(--ink); font-family: var(--mono); font-size: 12px; padding: 8px 14px; border-radius: 999px; opacity: 0; transition: opacity .2s, transform .2s; z-index: 20; pointer-events: none; }
     .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* plugin slots — Spotify embeds later; placeholders (band names) for now */
+    .plugins { position: fixed; top: 88px; bottom: 44px; width: 190px; display: flex; flex-direction: column; gap: 10px; z-index: 8; pointer-events: none; }
+    .plugins-left { left: 12px; }
+    .plugins-right { right: 12px; }
+    .plugin { background: rgba(19,19,24,.82); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+    .plugin .p-name { font-weight: 700; font-size: 13px; line-height: 1.15; }
+    .plugin .p-embed { flex: 1; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 10px; letter-spacing: .04em; color: var(--faint); border: 1px dashed var(--line); border-radius: 6px; text-align: center; padding: 4px; }
+    .plugin.is-focus { border-color: var(--accent); }
+    .plugin-bottom { display: none; }
+
+    @media (max-width: 900px) { .plugins { width: 148px; } }
+    @media (max-width: 640px) {
+      .plugins-left, .plugins-right { display: none; }
+      .plugin-bottom { display: block; position: fixed; left: 10px; right: 10px; bottom: 40px; z-index: 8; pointer-events: none; }
+      .plugin-bottom .plugin { height: 68px; }
+      .hud { flex-wrap: wrap; padding: 10px 12px; gap: 8px 12px; }
+      .title h1 { font-size: 14px; }
+      .title .sub { font-size: 10px; }
+      .search { order: 3; width: 100%; }
+      .search input { width: auto; flex: 1; }
+      .hint { display: none; }
+    }
   </style>
 </head>
 <body>
@@ -49,6 +72,10 @@
       <button class="btn" id="reset" type="button">reset</button>
     </div>
   </div>
+
+  <div class="plugins plugins-left" id="pluginsLeft"></div>
+  <div class="plugins plugins-right" id="pluginsRight"></div>
+  <div class="plugin-bottom" id="pluginBottom"></div>
 
   <div class="stat" id="stat"></div>
   <div class="hint"><b>Click</b> a node to branch its similars · or <b>drag</b> it into the centre ring</div>
