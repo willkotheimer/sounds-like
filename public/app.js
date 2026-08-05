@@ -257,10 +257,14 @@
   }
   // Create a controller on `host` (replaced by the iframe). `autoplay` starts the
   // centre; starting any player pauses the others (only one sounds at a time).
-  function mountPlayer(host, id, gen, autoplay, height) {
+  function mountPlayer(host, id, gen, autoplay, scaled) {
     whenApi(function (api) {
       if (gen !== pluginGen || !host.isConnected) return;
-      api.createController(host, { uri: "spotify:artist:" + id, width: "100%", height: height || 152 }, function (controller) {
+      // scaled: natural 300x352 card (CSS shrinks it); otherwise a full-width compact bar
+      var opts = scaled
+        ? { uri: "spotify:artist:" + id, width: 300, height: 352 }
+        : { uri: "spotify:artist:" + id, width: "100%", height: 152 };
+      api.createController(host, opts, function (controller) {
         if (gen !== pluginGen) { try { controller.destroy(); } catch (e) {} return; }
         controllers.push(controller);
         controller.addListener("playback_update", function (e) {
@@ -273,22 +277,22 @@
     });
   }
 
-  function slotHTML(nd, isFocus) {
+  function slotHTML(nd, isFocus, scaled) {
     var right = isFocus ? '' : '<span class="p-match">' + Math.round(matchToFocus(nd) * 100) + '%</span>';
     return '<div class="plugin' + (isFocus ? " is-focus" : "") + '" data-artist="' + esc(nd.name) + '">' +
       '<div class="p-name"><span>' + esc(nd.name) + '</span>' + right + '</div>' +
-      '<div class="p-player"><div class="pl-empty">loading…</div></div></div>';
+      '<div class="p-player' + (scaled ? " scaled" : "") + '"><div class="p-embed-host"><div class="pl-empty">loading…</div></div></div></div>';
   }
   // Render a column of slots, then mount a Spotify IFrame-API player in each.
-  function buildColumn(el, items, focusNode, gen, height) {
-    el.innerHTML = items.map(function (nd) { return slotHTML(nd, nd === focusNode); }).join("");
-    var hosts = el.querySelectorAll(".p-player");
+  function buildColumn(el, items, focusNode, gen, scaled) {
+    el.innerHTML = items.map(function (nd) { return slotHTML(nd, nd === focusNode, scaled); }).join("");
+    var hosts = el.querySelectorAll(".p-embed-host");
     items.forEach(function (nd, i) {
       var host = hosts[i]; if (!host) return;
       var isFocus = nd === focusNode;
       fetchArtist(nd.name).then(function (info) {
         if (gen !== pluginGen || !host.isConnected) return; // rebuilt while fetching
-        if (info.spotify && info.spotify.id) mountPlayer(host, info.spotify.id, gen, isFocus, height);
+        if (info.spotify && info.spotify.id) mountPlayer(host, info.spotify.id, gen, isFocus, scaled);
         else host.innerHTML = '<div class="pl-empty">' + (info.configured === false ? "Add Spotify keys" : "Not on Spotify") + "</div>";
       });
     });
@@ -311,10 +315,10 @@
       left.innerHTML = right.innerHTML = bottom.innerHTML = "";
     } else if (isMobile()) {
       left.innerHTML = right.innerHTML = "";
-      buildColumn(bottom, [fn], fn, pluginGen, 152);            // mobile: compact full-width bar
+      buildColumn(bottom, [fn], fn, pluginGen, false);          // mobile: compact full-width bar
     } else {
-      buildColumn(left, list.slice(0, 4), fn, pluginGen, 352);  // centre + 3, tall vertical cards
-      buildColumn(right, list.slice(4, 7), fn, pluginGen, 352); // 3 more
+      buildColumn(left, list.slice(0, 4), fn, pluginGen, true); // centre + 3, scaled vertical cards
+      buildColumn(right, list.slice(4, 7), fn, pluginGen, true); // 3 more
       bottom.innerHTML = "";
     }
     lastMobile = isMobile();
