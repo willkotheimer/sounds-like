@@ -387,7 +387,11 @@
   function seed(name) {
     nodes.clear(); edges.length = 0; edgeSet.clear();
     var n = getNode(name, null);
-    if (isMobile()) { n.x = W * 0.42; n.y = H * 0.30; } else { n.x = cx; n.y = cy; }
+    if (isMobile()) { // seed lands just southwest of the reset button
+      var rb = document.getElementById("reset");
+      if (rb) { var r = rb.getBoundingClientRect(); n.x = r.left - 24; n.y = r.bottom + 48; }
+      else { n.x = W * 0.6; n.y = H * 0.24; }
+    } else { n.x = cx; n.y = cy; }
     n.alpha = 1;
     focus(n);
     setTimeout(function () { expand(n); }, reduced ? 0 : 220);
@@ -402,7 +406,7 @@
   function physics() {
     var arr = Array.from(nodes.values()), n = arr.length;
     var focusNode = focusName ? nodes.get(norm(focusName)) : null;
-    var SCALE = sc(), LINKF = isMobile() ? 0.72 : 1; // shorter edges on mobile
+    var SCALE = sc(), LINKF = isMobile() ? 0.55 : 1; // shorter edges on mobile
 
     for (var i = 0; i < n; i++) {
       var a = arr[i];
