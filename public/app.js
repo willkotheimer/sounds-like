@@ -244,21 +244,51 @@
     return artistCache[k];
   }
 
+  // ── Spotify IFrame API: real players with play/pause + events ──────────────
+  var SpApi = null, apiQueue = [];
+  window.onSpotifyIframeApiReady = function (api) { SpApi = api; apiQueue.forEach(function (fn) { fn(api); }); apiQueue = []; };
+  function whenApi(cb) { if (SpApi) cb(SpApi); else apiQueue.push(cb); }
+
+  var controllers = []; // live slot controllers
+  var pluginGen = 0;    // bumped on every rebuild so stale async callbacks bail
+  function destroyControllers() {
+    controllers.forEach(function (c) { try { c.destroy(); } catch (e) {} });
+    controllers = [];
+  }
+  // Create a controller on `host` (replaced by the iframe). `autoplay` starts the
+  // centre; starting any player pauses the others (only one sounds at a time).
+  function mountPlayer(host, id, gen, autoplay) {
+    whenApi(function (api) {
+      if (gen !== pluginGen || !host.isConnected) return;
+      api.createController(host, { uri: "spotify:artist:" + id, width: "100%", height: 80 }, function (controller) {
+        if (gen !== pluginGen) { try { controller.destroy(); } catch (e) {} return; }
+        controllers.push(controller);
+        controller.addListener("playback_update", function (e) {
+          if (e && e.data && e.data.isPaused === false) {
+            controllers.forEach(function (c) { if (c !== controller) { try { c.pause(); } catch (_) {} } });
+          }
+        });
+        if (autoplay) { try { controller.play(); } catch (e) {} } // best-effort; browsers gate autoplay-with-sound
+      });
+    });
+  }
+
   function slotHTML(nd, isFocus) {
     var right = isFocus ? '' : '<span class="p-match">' + Math.round(matchToFocus(nd) * 100) + '%</span>';
     return '<div class="plugin' + (isFocus ? " is-focus" : "") + '" data-artist="' + esc(nd.name) + '">' +
       '<div class="p-name"><span>' + esc(nd.name) + '</span>' + right + '</div>' +
       '<div class="p-player"><div class="pl-empty">loading…</div></div></div>';
   }
-  // Render a column of slots, then drop a Spotify embed into each once resolved.
-  function buildColumn(el, items, focusNode) {
+  // Render a column of slots, then mount a Spotify IFrame-API player in each.
+  function buildColumn(el, items, focusNode, gen) {
     el.innerHTML = items.map(function (nd) { return slotHTML(nd, nd === focusNode); }).join("");
     var hosts = el.querySelectorAll(".p-player");
     items.forEach(function (nd, i) {
       var host = hosts[i]; if (!host) return;
+      var isFocus = nd === focusNode;
       fetchArtist(nd.name).then(function (info) {
-        if (!host.isConnected) return; // column was rebuilt while fetching
-        if (info.spotify && info.spotify.id) host.innerHTML = playerFrame(info.spotify.id, 80);
+        if (gen !== pluginGen || !host.isConnected) return; // rebuilt while fetching
+        if (info.spotify && info.spotify.id) mountPlayer(host, info.spotify.id, gen, isFocus);
         else host.innerHTML = '<div class="pl-empty">' + (info.configured === false ? "Add Spotify keys" : "Not on Spotify") + "</div>";
       });
     });
@@ -275,14 +305,16 @@
     neigh.sort(function (a, b) { return matchToFocus(b) - matchToFocus(a); });
     var list = (fn ? [fn].concat(neigh) : neigh).slice(0, 7); // centre + 6
 
+    pluginGen++;            // invalidate any in-flight player mounts
+    destroyControllers();   // tear down old players before rebuilding
     if (!fn) {
       left.innerHTML = right.innerHTML = bottom.innerHTML = "";
     } else if (isMobile()) {
       left.innerHTML = right.innerHTML = "";
-      buildColumn(bottom, [fn], fn);            // mobile: only the selected player
+      buildColumn(bottom, [fn], fn, pluginGen);            // mobile: only the selected player
     } else {
-      buildColumn(left, list.slice(0, 4), fn);  // centre + 3 (4 players)
-      buildColumn(right, list.slice(4, 7), fn); // 3 players
+      buildColumn(left, list.slice(0, 4), fn, pluginGen);  // centre + 3 (4 players)
+      buildColumn(right, list.slice(4, 7), fn, pluginGen); // 3 players
       bottom.innerHTML = "";
     }
     lastMobile = isMobile();
@@ -291,19 +323,8 @@
     if (statEl) statEl.textContent = nodes.size + " artists · " + edges.length + " links · seed: " + (seedName || "—") + " · " + (USE_API ? "live" : "demo data");
   }
 
-  // Only one sound at a time: opening the modal silences every slot player,
-  // and closing restores them. (Players never autoplay, so nothing blares.)
-  function pauseAllSlots() {
-    document.querySelectorAll(".p-player iframe").forEach(function (f) {
-      if (!f.dataset.src) f.dataset.src = f.src;
-      f.src = "about:blank";
-    });
-  }
-  function restoreAllSlots() {
-    document.querySelectorAll(".p-player iframe").forEach(function (f) {
-      if (f.dataset.src) { f.src = f.dataset.src; f.removeAttribute("data-src"); }
-    });
-  }
+  // Opening the modal pauses every slot player so the modal is the only sound.
+  function pauseAllSlots() { controllers.forEach(function (c) { try { c.pause(); } catch (e) {} }); }
 
   async function openModal(name) {
     var modal = document.getElementById("modal");
@@ -333,7 +354,6 @@
     if (!modal) return;
     document.getElementById("modalPlayer").innerHTML = ""; // stop the modal player
     modal.hidden = true;
-    restoreAllSlots();
   }
 
   function seed(name) {
