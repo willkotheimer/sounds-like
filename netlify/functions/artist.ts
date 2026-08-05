@@ -20,7 +20,7 @@ async function spotifyToken(id: string, secret: string): Promise<string> {
     },
     body: "grant_type=client_credentials",
   });
-  if (!res.ok) throw new Error("Spotify token " + res.status);
+  if (!res.ok) { const t = await res.text().catch(function () { return ""; }); throw new Error("token " + res.status + " " + t.slice(0, 160)); }
   const j: any = await res.json();
   spToken = j.access_token;
   spTokenExp = Date.now() + Math.max(0, (j.expires_in || 3600) - 60) * 1000;
@@ -36,6 +36,7 @@ export const handler: Handler = async (event) => {
   const lfm = process.env.LASTFM_API_KEY;
 
   let spotify: any = null;
+  let spotifyError: string | null = null;
   if (cid && secret) {
     try {
       const token = await spotifyToken(cid, secret);
@@ -43,7 +44,10 @@ export const handler: Handler = async (event) => {
         "https://api.spotify.com/v1/search?type=artist&limit=1&q=" +
         encodeURIComponent(name);
       const res = await fetch(url, { headers: { Authorization: "Bearer " + token } });
-      if (res.ok) {
+      if (!res.ok) {
+        const t = await res.text().catch(function () { return ""; });
+        spotifyError = "search " + res.status + " " + t.slice(0, 160);
+      } else {
         const data: any = await res.json();
         const a = data?.artists?.items?.[0];
         if (a) {
@@ -54,10 +58,12 @@ export const handler: Handler = async (event) => {
             genres: a.genres || [],
             followers: a.followers?.total || 0,
           };
+        } else {
+          spotifyError = "no artist match";
         }
       }
-    } catch {
-      /* leave spotify null on failure */
+    } catch (e: any) {
+      spotifyError = String((e && e.message) || e);
     }
   }
 
@@ -83,7 +89,8 @@ export const handler: Handler = async (event) => {
     }
   }
 
-  return json(200, { name, spotify, bio, configured: !!(cid && secret) }, 3600);
+  // Don't CDN-cache failures — otherwise a bad response sticks for an hour.
+  return json(200, { name, spotify, bio, configured: !!(cid && secret), spotifyError }, spotify ? 3600 : 0);
 };
 
 function json(statusCode: number, body: unknown, cacheSeconds = 0) {
