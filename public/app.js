@@ -93,6 +93,7 @@
     canvas.width = W * dpr; canvas.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     cx = W / 2; cy = H / 2; ringR = Math.max(60, Math.min(W, H) * 0.15);
     SZ = W < 640 ? 0.7 : 1; // smaller nodes + spacing on mobile
+    if (nodes && isMobile() !== lastMobile) updatePlugins(); // rebuild slots when crossing the breakpoint
   }
   addEventListener("resize", resize); resize();
 
@@ -226,7 +227,8 @@
   // Spotify: resolve name -> { spotify:{id,image,genres,...}, bio } via /api/artist,
   // memoized so navigating back doesn't refetch. Player is Spotify's embed iframe.
   var artistCache = {};
-  var centerId = null, centerPlayerName = null;
+  var lastMobile = false;
+  function isMobile() { return matchMedia("(max-width:640px)").matches; }
 
   function embedSrc(id) { return "https://open.spotify.com/embed/artist/" + id + "?utm_source=generator&theme=0"; }
   function playerFrame(id, h) {
@@ -242,16 +244,24 @@
     return artistCache[k];
   }
 
-  function cardHTML(nd, isFocus) {
-    var label = isFocus ? "centre — tap to play" : (Math.round(matchToFocus(nd) * 100) + "% match");
+  function slotHTML(nd, isFocus) {
+    var right = isFocus ? '' : '<span class="p-match">' + Math.round(matchToFocus(nd) * 100) + '%</span>';
     return '<div class="plugin' + (isFocus ? " is-focus" : "") + '" data-artist="' + esc(nd.name) + '">' +
-      '<div class="p-name">' + esc(nd.name) + '</div>' +
-      '<div class="p-embed">' + label + '</div></div>';
+      '<div class="p-name"><span>' + esc(nd.name) + '</span>' + right + '</div>' +
+      '<div class="p-player"><div class="pl-empty">loading…</div></div></div>';
   }
-  function centerHTML(nd) {
-    return '<div class="plugin is-focus is-player" data-artist="' + esc(nd.name) + '">' +
-      '<div class="p-name">' + esc(nd.name) + '</div>' +
-      '<div class="p-player center-player"><div class="pl-empty">loading player…</div></div></div>';
+  // Render a column of slots, then drop a Spotify embed into each once resolved.
+  function buildColumn(el, items, focusNode) {
+    el.innerHTML = items.map(function (nd) { return slotHTML(nd, nd === focusNode); }).join("");
+    var hosts = el.querySelectorAll(".p-player");
+    items.forEach(function (nd, i) {
+      var host = hosts[i]; if (!host) return;
+      fetchArtist(nd.name).then(function (info) {
+        if (!host.isConnected) return; // column was rebuilt while fetching
+        if (info.spotify && info.spotify.id) host.innerHTML = playerFrame(info.spotify.id, 80);
+        else host.innerHTML = '<div class="pl-empty">' + (info.configured === false ? "Add Spotify keys" : "Not on Spotify") + "</div>";
+      });
+    });
   }
 
   function updatePlugins() {
@@ -265,44 +275,40 @@
     neigh.sort(function (a, b) { return matchToFocus(b) - matchToFocus(a); });
     var list = (fn ? [fn].concat(neigh) : neigh).slice(0, 7); // centre + 6
 
-    if (fn) {
-      // desktop: centre = live inline player, then 3 neighbour cards left / 3 right
-      left.innerHTML = centerHTML(fn) + list.slice(1, 4).map(function (nd) { return cardHTML(nd, false); }).join("");
-      right.innerHTML = list.slice(4, 7).map(function (nd) { return cardHTML(nd, false); }).join("");
-      bottom.innerHTML = cardHTML(fn, true); // mobile: tap the centre card to open the player
-      ensureCenterPlayer(fn.name);
-    } else {
+    if (!fn) {
       left.innerHTML = right.innerHTML = bottom.innerHTML = "";
+    } else if (isMobile()) {
+      left.innerHTML = right.innerHTML = "";
+      buildColumn(bottom, [fn], fn);            // mobile: only the selected player
+    } else {
+      buildColumn(left, list.slice(0, 4), fn);  // centre + 3 (4 players)
+      buildColumn(right, list.slice(4, 7), fn); // 3 players
+      bottom.innerHTML = "";
     }
+    lastMobile = isMobile();
 
     var statEl = document.getElementById("stat");
     if (statEl) statEl.textContent = nodes.size + " artists · " + edges.length + " links · seed: " + (seedName || "—") + " · " + (USE_API ? "live" : "demo data");
   }
 
-  function ensureCenterPlayer(name) {
-    var box = document.querySelector(".center-player");
-    if (!box) return;
-    centerPlayerName = name;
-    fetchArtist(name).then(function (info) {
-      if (centerPlayerName !== name) return; // focus moved on while fetching
-      var b = document.querySelector(".center-player");
-      if (!b) return;
-      if (info.spotify && info.spotify.id) {
-        centerId = info.spotify.id;
-        b.innerHTML = playerFrame(info.spotify.id, 152);
-      } else {
-        centerId = null;
-        b.innerHTML = '<div class="pl-empty">' + (info.configured === false ? "Add Spotify keys to play" : "Not on Spotify") + "</div>";
-      }
+  // Only one sound at a time: opening the modal silences every slot player,
+  // and closing restores them. (Players never autoplay, so nothing blares.)
+  function pauseAllSlots() {
+    document.querySelectorAll(".p-player iframe").forEach(function (f) {
+      if (!f.dataset.src) f.dataset.src = f.src;
+      f.src = "about:blank";
     });
   }
-  function pauseCenter() { var f = document.querySelector(".center-player iframe"); if (f) f.src = "about:blank"; }
-  function restoreCenter() { if (centerId) { var f = document.querySelector(".center-player iframe"); if (f) f.src = embedSrc(centerId); } }
+  function restoreAllSlots() {
+    document.querySelectorAll(".p-player iframe").forEach(function (f) {
+      if (f.dataset.src) { f.src = f.dataset.src; f.removeAttribute("data-src"); }
+    });
+  }
 
   async function openModal(name) {
     var modal = document.getElementById("modal");
     if (!modal) return;
-    pauseCenter(); // only one player sounds at a time
+    pauseAllSlots(); // silence the slot players while the modal plays
     document.getElementById("modalName").textContent = name;
     document.getElementById("modalGenres").textContent = "";
     document.getElementById("modalImg").style.display = "none";
@@ -327,7 +333,7 @@
     if (!modal) return;
     document.getElementById("modalPlayer").innerHTML = ""; // stop the modal player
     modal.hidden = true;
-    restoreCenter();
+    restoreAllSlots();
   }
 
   function seed(name) {
